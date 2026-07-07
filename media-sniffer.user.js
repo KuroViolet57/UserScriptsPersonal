@@ -2,7 +2,7 @@
 // @name         Better Media Sniffer
 // @name:es      Mejor Detector de Medios
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.1.0
+// @version      1.2.0
 // @description  A better media sniffer for Android userscript managers (Via Browser, etc). Detects videos/audio on the page, shows an organized list with size + extension filters, adds a floating button on video players that opens a resizable pop-up player with download / open-in-external-player / copy-link actions.
 // @description:es Detector de medios mejorado para navegadores Android. Detecta videos/audio, lista organizada con filtros por tamaño y extension, boton flotante sobre el reproductor con ventana emergente para descargar, abrir en reproductor externo o copiar enlace.
 // @author       KuroViolet57
@@ -558,6 +558,15 @@
             rect.bottom > 0 && rect.top < window.innerHeight &&
             rect.right > 0 && rect.left < window.innerWidth;
         if (!visible) { btn.style.display = 'none'; return; }
+        // Respect the active filter: don't show a button on a video whose media
+        // doesn't pass the filter (keeps thumbnail-heavy pages usable).
+        if (filterIsActive()) {
+            const item = itemForVideo(video);
+            if (item && !matchesFilter(item)) { btn.style.display = 'none'; return; }
+            // No captured source yet but a size floor is set: hide until we know
+            // it qualifies, so tiny/uncaptured previews stay clean.
+            if (!item && listFilter.minSize > 0) { btn.style.display = 'none'; return; }
+        }
         btn.style.display = 'flex';
         btn.style.width = size + 'px';
         btn.style.height = size + 'px';
@@ -696,7 +705,42 @@
      *  Media list panel (with filters)
      * ------------------------------------------------------------------ */
     let listOverlay = null;
-    const listFilter = { type: 'all', ext: 'all', minSize: 0, query: '' };
+    const listFilter = Object.assign(
+        { type: 'all', ext: 'all', minSize: 0, query: '' },
+        GM.getValue('filter', {})
+    );
+
+    function saveFilter() { GM.setValue('filter', listFilter); }
+
+    // Shared predicate used by the list, the FAB count, and on-video buttons.
+    function matchesFilter(m) {
+        if (!m) return true;
+        if (listFilter.type !== 'all' && m.kind !== listFilter.type) return false;
+        if (listFilter.ext !== 'all' && m.ext !== listFilter.ext) return false;
+        if (listFilter.minSize && (!m.size || m.size < listFilter.minSize)) return false;
+        if (listFilter.query && m.name.toLowerCase().indexOf(listFilter.query.toLowerCase()) === -1) return false;
+        return true;
+    }
+
+    function filterIsActive() {
+        return listFilter.type !== 'all' || listFilter.ext !== 'all' ||
+               listFilter.minSize > 0 || !!listFilter.query;
+    }
+
+    // Find the detected media item that belongs to a given <video> element.
+    function itemForVideo(video) {
+        const urls = collectSources(video);
+        for (const u of urls) { const it = store.find(m => m.url === u); if (it) return it; }
+        return store.find(m => m.el === video) || null;
+    }
+
+    // When filters change, refresh everything they influence.
+    function applyFilterEverywhere() {
+        saveFilter();
+        renderList();
+        updateFab();
+        repositionAllButtons();
+    }
 
     function openList() {
         if (listOverlay) { renderList(); return; }
@@ -742,9 +786,15 @@
             el.addEventListener('input', () => {
                 const f = el.getAttribute('data-f');
                 listFilter[f] = (f === 'minSize') ? parseInt(el.value, 10) : el.value;
-                renderList();
+                applyFilterEverywhere();
             });
         });
+
+        // Restore persisted filter values into the controls.
+        panel.querySelector('[data-f="type"]').value = listFilter.type;
+        panel.querySelector('[data-f="minSize"]').value = String(listFilter.minSize || 0);
+        panel.querySelector('[data-f="query"]').value = listFilter.query || '';
+
         renderList();
     }
 
@@ -752,27 +802,24 @@
 
     function renderList() {
         if (!listOverlay) return;
-        // refresh ext dropdown
+        // refresh ext dropdown (keep the persisted ext selectable even if not
+        // yet detected on this page, so the saved filter survives a reload)
         const extSel = listOverlay.querySelector('[data-f="ext"]');
-        const exts = Array.from(new Set(store.map(m => m.ext).filter(Boolean))).sort();
-        const cur = listFilter.ext;
+        const exts = Array.from(new Set(store.map(m => m.ext).filter(Boolean)));
+        if (listFilter.ext !== 'all' && exts.indexOf(listFilter.ext) === -1) exts.push(listFilter.ext);
+        exts.sort();
         extSel.innerHTML = '<option value="all">All extensions</option>' +
             exts.map(e => `<option value="${e}">${e.toUpperCase()}</option>`).join('');
-        extSel.value = exts.indexOf(cur) !== -1 ? cur : 'all';
-        if (extSel.value !== cur) listFilter.ext = extSel.value;
+        extSel.value = listFilter.ext;
 
         const body = listOverlay.querySelector('#bms-list-body');
-        let items = store.slice().sort((a, b) => b.ts - a.ts);
-        items = items.filter(m => {
-            if (listFilter.type !== 'all' && m.kind !== listFilter.type) return false;
-            if (listFilter.ext !== 'all' && m.ext !== listFilter.ext) return false;
-            if (listFilter.minSize && (!m.size || m.size < listFilter.minSize)) return false;
-            if (listFilter.query && m.name.toLowerCase().indexOf(listFilter.query.toLowerCase()) === -1) return false;
-            return true;
-        });
+        let items = store.slice().sort((a, b) => b.ts - a.ts).filter(matchesFilter);
 
         if (!items.length) {
-            body.innerHTML = '<div class="bms-empty">No media detected yet.<br>Play or scroll to the video, then reopen.</div>';
+            const msg = (store.length && filterIsActive())
+                ? ('No media matches the filter (' + store.length + ' hidden).<br>Adjust or clear the filter above.')
+                : 'No media detected yet.<br>Play or scroll to the video, then reopen.';
+            body.innerHTML = '<div class="bms-empty">' + msg + '</div>';
             return;
         }
         body.innerHTML = '';
@@ -961,8 +1008,9 @@
             document.body.appendChild(fab);
         }
         const c = fab.querySelector('.bms-fab-count');
-        c.textContent = store.length;
-        c.style.display = store.length ? 'flex' : 'none';
+        const n = store.filter(matchesFilter).length;
+        c.textContent = n;
+        c.style.display = n ? 'flex' : 'none';
     }
 
     /* ------------------------------------------------------------------ *
@@ -971,6 +1019,7 @@
     installNetworkHooks();
 
     onChange(updateFab);
+    onChange(repositionAllButtons);
 
     function boot() {
         scanMediaElements();

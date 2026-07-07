@@ -22,7 +22,10 @@ This script fixes that.
 - **Organized media list** — every detected media resource with its
   **name, extension, type (video/audio) and file size**.
 - **Filters** — by type (video/audio), by extension, by minimum size, and a
-  name search box.
+  name search box. Filters are **persistent** (saved across page reloads) and
+  apply everywhere: the list, the corner-launcher count, **and** the on-video
+  buttons. Set a minimum size and small thumbnail previews stop showing buttons —
+  handy on sites full of preview clips.
 - **Three actions** on each item / in the player:
   1. **Download** — triggers a normal browser download so Via hands it to your
      selected download manager (Via internal / System / **1DM+** / **ADM**).
