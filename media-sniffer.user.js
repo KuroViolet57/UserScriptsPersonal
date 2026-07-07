@@ -2,7 +2,7 @@
 // @name         Better Media Sniffer
 // @name:es      Mejor Detector de Medios
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.0.0
+// @version      1.1.0
 // @description  A better media sniffer for Android userscript managers (Via Browser, etc). Detects videos/audio on the page, shows an organized list with size + extension filters, adds a floating button on video players that opens a resizable pop-up player with download / open-in-external-player / copy-link actions.
 // @description:es Detector de medios mejorado para navegadores Android. Detecta videos/audio, lista organizada con filtros por tamaño y extension, boton flotante sobre el reproductor con ventana emergente para descargar, abrir en reproductor externo o copiar enlace.
 // @author       KuroViolet57
@@ -424,28 +424,75 @@
     /* ------------------------------------------------------------------ *
      *  Actions: download / open in player / copy
      * ------------------------------------------------------------------ */
-    function anchorDownload(item) {
+    const DL_PKGS = { adm: 'com.dv.adm', '1dm': 'idm.internet.download.manager.plus' };
+
+    // Last-resort: click a real <a download>. On Android this only reliably saves
+    // for same-origin / blob URLs; for cross-origin direct files the WebView tends
+    // to just open the file, which is exactly the bug we avoid by preferring blob.
+    function anchorDownload(item, saveUrl) {
         const a = document.createElement('a');
-        a.href = item.url;
-        a.download = item.name || '';
+        a.href = saveUrl || item.url;
+        a.download = item.name || 'video';
         a.rel = 'noopener';
-        a.target = '_blank';
         document.body.appendChild(a);
         a.click();
         setTimeout(() => a.remove(), 0);
     }
 
+    // Fetch the file as a blob (GM.xhr bypasses CORS) and save it locally. This
+    // forces a genuine download instead of the browser opening the video in a tab.
+    function blobDownload(item) {
+        if (item.blob) { anchorDownload(item); toast('Saving…'); return; }
+        toast('Starting download…');
+        const req = GM.xhr({
+            method: 'GET',
+            url: item.url,
+            responseType: 'blob',
+            timeout: 0,
+            onprogress(e) {
+                if (e && e.lengthComputable) toast('Downloading ' + Math.round(e.loaded / e.total * 100) + '%');
+            },
+            onload(r) {
+                try {
+                    const blob = r.response;
+                    if (!blob || (blob.size === 0)) { toast('Empty response, opening link'); anchorDownload(item); return; }
+                    const url = URL.createObjectURL(blob);
+                    anchorDownload(item, url);
+                    setTimeout(() => URL.revokeObjectURL(url), 120000);
+                    toast('Saved: ' + item.name);
+                } catch (e) { toast('Save failed, opening link'); anchorDownload(item); }
+            },
+            onerror() { toast('Direct download failed, opening link'); anchorDownload(item); },
+            ontimeout() { toast('Download timed out, opening link'); anchorDownload(item); }
+        });
+        if (!req) { toast('GM_xmlhttpRequest unavailable — opening link'); anchorDownload(item); }
+    }
+
+    // Hand the real http(s) URL to an external app (1DM+, ADM, or a chooser).
+    function intentDownload(item, pkg) {
+        if (item.blob) { toast('Blob source can only be saved directly'); blobDownload(item); return; }
+        const mime = item.mime || MIME_MAP[item.ext] || (item.kind === 'audio' ? 'audio/*' : 'video/*');
+        let intent = 'intent:' + item.url + '#Intent;action=android.intent.action.VIEW;';
+        intent += 'type=' + encodeURIComponent(mime) + ';';
+        if (pkg) intent += 'package=' + pkg + ';';
+        intent += 'S.title=' + encodeURIComponent(item.name) + ';end';
+        try { window.location.href = intent; }
+        catch (e) { toast('No handler, downloading directly'); blobDownload(item); }
+    }
+
     function downloadMedia(item) {
-        if (settings.downloadMethod === 'gm' && !item.blob) {
-            const ok = GM.download({
-                url: item.url,
-                name: item.name,
-                onerror: () => anchorDownload(item)
-            });
-            if (ok) { toast('Download started'); return; }
+        switch (settings.downloadMethod) {
+            case 'gm':
+                if (!item.blob && GM.download({ url: item.url, name: item.name, onerror: () => blobDownload(item) })) {
+                    toast('Download started'); return;
+                }
+                blobDownload(item); return;
+            case '1dm': intentDownload(item, DL_PKGS['1dm']); return;
+            case 'adm': intentDownload(item, DL_PKGS.adm); return;
+            case 'intent': intentDownload(item, ''); return;
+            case 'browser':
+            default: blobDownload(item); return;
         }
-        anchorDownload(item);
-        toast('Opening download…');
     }
 
     function openInPlayer(item) {
@@ -662,6 +709,7 @@
         panel.innerHTML = `
             <div class="bms-head">
                 <span>🎯 Detected media</span><span class="bms-spacer"></span>
+                <button class="bms-x" data-act="settings" title="Settings">⚙️</button>
                 <button class="bms-x" data-act="clear" title="Clear list">🗑</button>
                 <button class="bms-x" data-act="close">✕</button>
             </div>
@@ -686,6 +734,7 @@
         document.body.appendChild(listOverlay);
 
         panel.querySelector('[data-act="close"]').addEventListener('click', closeList);
+        panel.querySelector('[data-act="settings"]').addEventListener('click', () => { closeList(); openSettings(); });
         panel.querySelector('[data-act="clear"]').addEventListener('click', () => {
             store.length = 0; seen.clear(); emit(); renderList();
         });
@@ -794,9 +843,12 @@
                     <input type="text" id="bms-custom-pkg" placeholder="com.example.player" value="${isCustom ? settings.playerPackage : ''}">
                 </div>
                 <div class="bms-row">
-                    <label>Download method<span class="bms-hint">Browser = your selected download manager (1DM+, ADM…)</span></label>
+                    <label>Download method<span class="bms-hint">"Send to 1DM+/ADM" hands the URL to that app. "Direct" saves the file in-browser.</span></label>
                     <select data-s="downloadMethod">
-                        <option value="browser">Browser download manager</option>
+                        <option value="browser">Direct download (save file)</option>
+                        <option value="1dm">Send to 1DM+</option>
+                        <option value="adm">Send to ADM</option>
+                        <option value="intent">Send to app (chooser)</option>
                         <option value="gm">Userscript (GM_download)</option>
                     </select>
                 </div>
@@ -885,18 +937,27 @@
             fab = document.createElement('button');
             fab.className = 'bms-fab';
             fab.innerHTML = '🎯<span class="bms-fab-count">0</span>';
-            let moved = false, sx, sy, ox, oy;
-            const down = (x, y) => { moved = false; sx = x; sy = y; const r = fab.getBoundingClientRect(); ox = r.left; oy = r.top; };
+            fab.title = 'Tap: media list · Long-press: settings';
+            let moved = false, longPressed = false, lpTimer = null, sx, sy, ox, oy;
+            const down = (x, y) => {
+                moved = false; longPressed = false; sx = x; sy = y;
+                const r = fab.getBoundingClientRect(); ox = r.left; oy = r.top;
+                clearTimeout(lpTimer);
+                lpTimer = setTimeout(() => { if (!moved) { longPressed = true; openSettings(); } }, 550);
+            };
             const mv = (x, y) => {
-                if (Math.abs(x - sx) + Math.abs(y - sy) > 6) moved = true;
+                if (Math.abs(x - sx) + Math.abs(y - sy) > 6) { moved = true; clearTimeout(lpTimer); }
                 let nl = ox + (x - sx), nt = oy + (y - sy);
                 nl = Math.min(Math.max(0, nl), window.innerWidth - 46);
                 nt = Math.min(Math.max(0, nt), window.innerHeight - 46);
                 fab.style.left = nl + 'px'; fab.style.top = nt + 'px'; fab.style.right = 'auto'; fab.style.bottom = 'auto';
             };
+            const up = () => { clearTimeout(lpTimer); };
             fab.addEventListener('touchstart', e => { const t = e.touches[0]; down(t.clientX, t.clientY); }, { passive: true });
             fab.addEventListener('touchmove', e => { const t = e.touches[0]; mv(t.clientX, t.clientY); }, { passive: true });
-            fab.addEventListener('click', () => { if (!moved) openList(); });
+            fab.addEventListener('touchend', up);
+            fab.addEventListener('touchcancel', up);
+            fab.addEventListener('click', () => { if (!moved && !longPressed) openList(); });
             document.body.appendChild(fab);
         }
         const c = fab.querySelector('.bms-fab-count');

@@ -33,7 +33,19 @@ This script fixes that.
   third-party player, download method, minimum video size, and network capture
   toggles.
 - **Corner launcher (FAB)** — a draggable 🎯 badge showing how many media items
-  were detected; tap to open the list. Can be turned off in Settings.
+  were detected. **Tap** to open the list, **long-press** to open Settings. Can
+  be turned off in Settings.
+
+## Opening Settings
+
+Via Browser doesn't reliably surface `GM_registerMenuCommand`, so Settings is
+reachable straight from the UI:
+
+- **Long-press the 🎯 corner launcher**, or
+- Open the media list and tap the **⚙️ gear** in its header.
+
+(The `GM_registerMenuCommand` entries are still registered for managers that
+support them.)
 
 ## Install (Via Browser)
 
@@ -46,17 +58,33 @@ This script fixes that.
 > The script header requests `GM_xmlhttpRequest` with `@connect *` so it can read
 > file sizes cross-origin. Via will ask you to allow this the first time.
 
-## How the actions map to Via
+## Downloading (important)
 
-- **Download method → "Browser download manager"** (default): the script clicks a
-  normal download link, so whatever downloader you picked in Via's settings
-  handles it — that's how 1DM+ / ADM get the job.
-- **Download method → "Userscript (GM_download)"**: downloads through the
-  userscript manager instead. Falls back to the browser method if unavailable.
-- **Open in player**: builds
-  `intent:<url>#Intent;action=VIEW;type=<mime>;package=<pkg>;end`. Pick your
-  player in Settings (MX Player, VLC, Just Player, nPlayer, Web Video Cast, or a
-  custom package name), or leave it on **Ask (system chooser)**.
+On Android, a plain download link to a **cross-origin** media file gets ignored
+by the WebView and the video just **opens in a new tab** instead of downloading.
+To avoid that, the download methods work like this:
+
+- **Direct download (save file)** *(default)* — the script fetches the file as a
+  blob (bypassing CORS) and saves it, so it actually downloads instead of opening
+  a tab. Best "just works" option. Note: the whole file is buffered in memory, so
+  very large files (multi-GB) are better sent to a real download manager below.
+- **Send to 1DM+** / **Send to ADM** — hands the real media URL to that app via an
+  android `intent:`, so 1DM+/ADM does the downloading (resumable, backgrounded).
+  This is the option to use if you specifically want your download manager to
+  handle it. The app must be installed.
+- **Send to app (chooser)** — same, but lets Android show the app chooser.
+- **Userscript (GM_download)** — downloads through the userscript manager; falls
+  back to Direct download if unsupported.
+
+> If **Direct download** ever fails (e.g. the manager can't read cross-origin
+> headers), the script falls back to opening the link and shows a toast telling
+> you what happened.
+
+### Open in player
+
+Builds `intent:<url>#Intent;action=VIEW;type=<mime>;package=<pkg>;end`. Pick your
+player in Settings (MX Player, VLC, Just Player, nPlayer, Web Video Cast, or a
+custom package name), or leave it on **Ask (system chooser)**.
 
 ## Notes & limitations
 
