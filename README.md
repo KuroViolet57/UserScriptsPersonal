@@ -3,13 +3,19 @@
 Personal userscripts for Android browsers with a built-in userscript manager
 (Via Browser, and compatible managers like Violentmonkey / Tampermonkey).
 
-## Scripts
+## Userscripts
 
 | Script | Description | Docs |
 | ------ | ----------- | ---- |
 | [`media-sniffer.user.js`](media-sniffer.user.js) | Better media sniffer: organized/detailed media list with size + extension filters, an on-video pop-up player, and download / open-in-external-player / copy-link actions. | [docs](docs/media-sniffer.md) |
 
-## Install
-
 Open your browser's userscript manager and add the raw `*.user.js` file, or paste
 its contents. See each script's docs page for details.
+
+## Web apps
+
+| App | Description | Docs |
+| --- | ----------- | ---- |
+| [`ai-search/`](ai-search/index.html) | Unfiltered AI search + chat front-end (18+). Bring your own model — API key, local server (Ollama/KoboldCpp), or an in-browser HuggingFace model — with optional SearXNG web search and citations. | [readme](ai-search/README.md) |
+
+Single self-contained HTML file — open it in a browser or host it statically.
