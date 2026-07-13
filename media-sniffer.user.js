@@ -2,7 +2,7 @@
 // @name         Better Media Sniffer
 // @name:es      Mejor Detector de Medios
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.3.1
+// @version      1.4.0
 // @description  A better media sniffer for Android userscript managers (Via Browser, etc). Detects videos/audio on the page, shows an organized list with size + extension filters, adds a floating button on video players that opens a resizable pop-up player with download / open-in-external-player / copy-link actions.
 // @description:es Detector de medios mejorado para navegadores Android. Detecta videos/audio, lista organizada con filtros por tamaño y extension, boton flotante sobre el reproductor con ventana emergente para descargar, abrir en reproductor externo o copiar enlace.
 // @author       KuroViolet57
@@ -133,7 +133,8 @@
         downloadMethod: IS_XBROWSER ? 'gm' : 'browser',
         gmTag: '',               // XBrowser GM_download subfolder tag ('' = none)
         playerPackage: '',       // android package for "open in player" ('' = chooser)
-        playerLabel: 'Ask (system chooser)'
+        playerLabel: 'Ask (system chooser)',
+        intentFormB: false       // use intent://host form instead of intent:url
     };
 
     let settings = Object.assign({}, DEFAULT_SETTINGS, GM.getValue('settings', {}));
@@ -539,9 +540,17 @@
     // specific codec (video/webm), so an explicit package + exact mime resolves
     // to nothing ("Allow" -> nothing happens). Broad mime matches reliably.
     function broadType(item) { return item.kind === 'audio' ? 'audio/*' : 'video/*'; }
-    function buildViewIntent(url, pkg, title, mime) {
-        let intent = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
-        intent += 'type=' + encodeURIComponent(mime) + ';';
+    function buildViewIntent(url, pkg, title, mime, formB) {
+        let intent;
+        if (formB) {
+            // Chrome-canonical form: intent://host/path#Intent;scheme=https;...
+            const m = /^([a-z][a-z0-9+.-]*):\/\/(.*)$/i.exec(url);
+            intent = m ? ('intent://' + m[2] + '#Intent;scheme=' + m[1] + ';action=android.intent.action.VIEW;')
+                       : ('intent:' + url + '#Intent;action=android.intent.action.VIEW;');
+        } else {
+            intent = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
+        }
+        if (mime) intent += 'type=' + encodeURIComponent(mime) + ';';
         if (pkg) intent += 'package=' + pkg + ';';
         if (title) intent += 'S.title=' + encodeURIComponent(title) + ';';
         intent += 'end';
@@ -566,14 +575,24 @@
         }
     }
 
+    let lastPlayItem = null;
+    let lastIntent = null;
+
+    function fireIntent(intent, label) {
+        lastIntent = intent;
+        try { console.log('[BMS] open-in-player intent (' + (label || '') + '):', intent); } catch (e) {}
+        try { window.BMS && (window.BMS.lastIntent = intent); } catch (e) {}
+        window.location.href = intent;
+    }
+
     function openInPlayer(item) {
         if (item.blob) { toast('Blob source can only be played in-page'); return; }
+        lastPlayItem = item;
         try {
-            window.location.href = buildViewIntent(item.url, settings.playerPackage, item.name, broadType(item));
+            fireIntent(buildViewIntent(item.url, settings.playerPackage, item.name, broadType(item),
+                settings.intentFormB), 'default');
             if (settings.playerPackage) {
-                // If the chosen app doesn't launch (not installed / filter mismatch),
-                // the user gets a silent no-op; hint at the reliable fallback.
-                setTimeout(() => toast('If nothing opened, try player = "Ask (system chooser)"'), 1500);
+                setTimeout(() => toast('Nothing opened? Menu → "Test Open-in-player" to find a working variant'), 1600);
             }
         } catch (e) {
             window.open(item.url, '_blank');
@@ -592,6 +611,87 @@
         document.body.appendChild(ta); ta.select();
         try { document.execCommand('copy'); toast('Link copied'); } catch (e) { toast('Copy failed'); }
         ta.remove();
+    }
+
+    /* ------------------------------------------------------------------ *
+     *  Diagnostics: on-screen console + "Open in player" intent tester
+     * ------------------------------------------------------------------ */
+    // On-screen console for phones (no chrome://inspect needed). Fetches eruda via
+    // GM.xhr and evals it so the page's CSP can't block it; falls back to a tag.
+    function toggleConsole() {
+        const init = () => { try { window.eruda.init(); toast('Console opened (tap the floating button)'); } catch (e) { toast('Console init failed'); } };
+        if (window.eruda) {
+            try { window.eruda.destroy(); window.eruda = null; toast('Console closed'); } catch (e) { init(); }
+            return;
+        }
+        toast('Loading console…');
+        const tagFallback = () => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+            s.onload = init;
+            s.onerror = () => toast('Could not load console (blocked / offline)');
+            (document.body || document.documentElement).appendChild(s);
+        };
+        const req = GM.xhr({
+            method: 'GET', url: 'https://cdn.jsdelivr.net/npm/eruda',
+            onload(r) {
+                try { (0, eval)(r.responseText); init(); }   // eslint-disable-line no-eval
+                catch (e) { tagFallback(); }
+            },
+            onerror: tagFallback, ontimeout: tagFallback
+        });
+        if (!req) tagFallback();
+    }
+
+    // Pick a target media item to test with.
+    function diagTarget() {
+        if (lastPlayItem && !lastPlayItem.blob) return lastPlayItem;
+        const vids = store.filter(m => m.kind === 'video' && !m.blob && !m.stream);
+        return vids.length ? vids[vids.length - 1] : (store.length ? store[store.length - 1] : null);
+    }
+
+    // Try each intent variant so you can find which one launches your player.
+    function openPlayerDiag() {
+        const item = diagTarget();
+        if (!item) { toast('No testable media yet — play/scan a direct video first'); return; }
+        const pkg = settings.playerPackage;
+        const pkgLabel = settings.playerLabel || (pkg || 'chooser');
+        const variants = [
+            ['① ' + pkgLabel + ' · video/*', () => buildViewIntent(item.url, pkg, item.name, broadType(item), false)],
+            ['② ' + pkgLabel + ' · intent:// form', () => buildViewIntent(item.url, pkg, item.name, broadType(item), true)],
+            ['③ System chooser · video/*', () => buildViewIntent(item.url, '', item.name, broadType(item), false)],
+            ['④ ' + pkgLabel + ' · exact mime', () => buildViewIntent(item.url, pkg, item.name, item.mime || MIME_MAP[item.ext] || broadType(item), false)],
+            ['⑤ ' + pkgLabel + ' · no type', () => buildViewIntent(item.url, pkg, item.name, '', false)]
+        ];
+
+        const ov = document.createElement('div');
+        ov.className = 'bms-overlay';
+        ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+        const panel = document.createElement('div');
+        panel.className = 'bms-panel';
+        panel.innerHTML = `<div class="bms-head"><span>🎬 Open-in-player test</span><span class="bms-spacer"></span>
+            <button class="bms-x" data-x>✕</button></div>
+            <div class="bms-body">
+              <div class="bms-hint" style="margin-bottom:10px">Target: <b>${escAttr(item.name)}</b><br>
+              Tap each until your player opens. Note which number works and tell me — I'll make it the default.
+              Use 🐞 Debug console to see the exact intent strings/errors.</div>
+            </div>`;
+        const body = panel.querySelector('.bms-body');
+        variants.forEach(([label, make]) => {
+            const b = mkBtn('', label, () => { fireIntent(make(), label); });
+            b.style.cssText = 'width:100%;justify-content:flex-start;margin-bottom:8px';
+            body.appendChild(b);
+        });
+        const copyBtn = mkBtn('sec', ICON_COPY + ' Copy all intent strings', () => {
+            const all = variants.map(([l, mk]) => l + '\n' + mk()).join('\n\n');
+            if (!GM.setClipboard(all) && navigator.clipboard) navigator.clipboard.writeText(all);
+            toast('Copied — paste it back to me');
+        });
+        copyBtn.style.cssText = 'width:100%;justify-content:center;margin-top:4px';
+        body.appendChild(copyBtn);
+        panel.querySelector('[data-x]').onclick = () => ov.remove();
+        ov.appendChild(panel);
+        document.body.appendChild(ov);
     }
 
     /* ------------------------------------------------------------------ *
@@ -672,6 +772,7 @@
     let activePlayer = null;
     function openPlayer(item, sourceVideo) {
         closePlayer();
+        lastPlayItem = item;
         const wrap = document.createElement('div');
         wrap.className = 'bms-player';
 
@@ -1156,6 +1257,8 @@
         _reg((settings.showFab ? '☑️' : '⬜') + ' Corner button', () => toggleSetting('showFab'));
         _reg((settings.fetchSizes ? '☑️' : '⬜') + ' Fetch file sizes', () => toggleSetting('fetchSizes'));
         _reg((settings.captureNetwork ? '☑️' : '⬜') + ' Network capture (reload)', () => toggleSetting('captureNetwork'));
+        _reg('🎬 Test "Open in player"', openPlayerDiag);
+        _reg('🐞 Debug console', toggleConsole);
         _reg('🧹 Clear detected list', () => { store.length = 0; seen.clear(); emit(); toast('List cleared'); });
     }
     function toggleSetting(key) {

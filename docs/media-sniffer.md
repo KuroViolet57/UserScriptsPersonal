@@ -112,6 +112,21 @@ reliably.
 > package/filter), switch the player to **Ask (system chooser)** — Android then
 > lists whatever apps can handle it, which always works.
 
+### Diagnostics (when a player won't open)
+
+Two menu commands help debug intent problems (they also appear in XBrowser's
+native script menu):
+
+- **🎬 Test "Open in player"** — opens a panel that fires the intent in several
+  variants against your last-played/most-recent video: chosen player with
+  `video/*`, the `intent://` form, the system chooser, the exact codec MIME, and
+  no-type. Tap each until your player opens, then use whichever works (or tell me
+  the number and I'll make it the default). There's a **Copy all intent strings**
+  button too.
+- **🐞 Debug console** — loads an on-screen JS console (eruda) so you can see
+  `console.log`/errors right on the phone, including the exact intent the script
+  fired. Fetched via `GM_xmlhttpRequest` so page CSP can't block it.
+
 ## Notes & limitations
 
 - **Streaming playlists (`.m3u8` / `.mpd`)** are detected and listed, but can't
