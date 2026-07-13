@@ -1,9 +1,9 @@
 # Better Media Sniffer
 
 A userscript media sniffer built for Android browsers with a built-in userscript
-manager (tested against **Via Browser**, also works in Violentmonkey /
-Tampermonkey). It replaces the browser's basic sniffer with an organized,
-detailed media list and an on-video pop-up player.
+manager (tested against **Via Browser** and **XBrowser**, also works in
+Violentmonkey / Tampermonkey). It replaces the browser's basic sniffer with an
+organized, detailed media list and an on-video pop-up player.
 
 ## Why
 
@@ -47,8 +47,9 @@ reachable straight from the UI:
 - **Long-press the 🎯 corner launcher**, or
 - Open the media list and tap the **⚙️ gear** in its header.
 
-(The `GM_registerMenuCommand` entries are still registered for managers that
-support them.)
+On **XBrowser** you also get the full set of entries in the native script menu
+(open list, open settings, cycle download method, and toggles for corner
+button / fetch sizes / network capture).
 
 ## Install (Via Browser)
 
@@ -65,23 +66,35 @@ support them.)
 
 On Android, a plain download link to a **cross-origin** media file gets ignored
 by the WebView and the video just **opens in a new tab** instead of downloading.
-To avoid that, the download methods work like this:
+The download methods avoid that:
 
-- **Direct download (save file)** *(default)* — the script fetches the file as a
-  blob (bypassing CORS) and saves it, so it actually downloads instead of opening
-  a tab. Best "just works" option. Note: the whole file is buffered in memory, so
-  very large files (multi-GB) are better sent to a real download manager below.
-- **Send to 1DM+** / **Send to ADM** — hands the real media URL to that app via an
-  android `intent:`, so 1DM+/ADM does the downloading (resumable, backgrounded).
-  This is the option to use if you specifically want your download manager to
-  handle it. The app must be installed.
-- **Send to app (chooser)** — same, but lets Android show the app chooser.
-- **Userscript (GM_download)** — downloads through the userscript manager; falls
-  back to Direct download if unsupported.
+- **GM download (manager + Referer)** — uses `GM_download`, adding a **`Referer`
+  header** (the page URL). Many media hosts use hotlink protection and return
+  403 without it, which shows up as a download **stuck in the queue** — the
+  Referer fixes that. On **XBrowser** this is the default and recommended method;
+  it hands the file to XBrowser's own downloader. Falls back to Direct on error.
+- **Direct download (blob save)** — fetches the file as a blob (bypassing CORS,
+  now also with a Referer header) and saves it. Default on **Via**. The file is
+  buffered in memory, so multi-GB files are better sent to a manager below.
+- **Send to 1DM+** / **Send to ADM** — hands the real URL to that app via an
+  android `intent:` (resumable, backgrounded). The app must be installed.
+- **Send to app (chooser)** — same, but Android shows the app chooser.
 
-> If **Direct download** ever fails (e.g. the manager can't read cross-origin
-> headers), the script falls back to opening the link and shows a toast telling
-> you what happened.
+> Each method falls back gracefully (GM → Direct → open link) and shows a toast
+> telling you what happened.
+
+### XBrowser notes
+
+- Set **Download method → GM download** (it's the default on XBrowser; a one-time
+  tip reminds you if your carried-over setting was something else).
+- **Download subfolder (tag)**: XBrowser's `GM_download` supports a `tag` that
+  saves into a named subfolder — set it in Settings (e.g. `Videos`).
+- If XBrowser **auto-opens a file after it downloads**, that's an XBrowser
+  setting (Downloads → open on completion), not something the script controls.
+- The settings toggles are mirrored into **XBrowser's native script menu** — tap
+  the menu entries to flip *Corner button*, *Fetch file sizes*, *Network
+  capture*, or to cycle the *Download method* without opening the panel.
+  (Network-capture changes take effect on the next page load.)
 
 ### Open in player
 

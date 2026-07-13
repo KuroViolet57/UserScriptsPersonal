@@ -2,7 +2,7 @@
 // @name         Better Media Sniffer
 // @name:es      Mejor Detector de Medios
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.2.0
+// @version      1.3.0
 // @description  A better media sniffer for Android userscript managers (Via Browser, etc). Detects videos/audio on the page, shows an organized list with size + extension filters, adds a floating button on video players that opens a resizable pop-up player with download / open-in-external-player / copy-link actions.
 // @description:es Detector de medios mejorado para navegadores Android. Detecta videos/audio, lista organizada con filtros por tamaño y extension, boton flotante sobre el reproductor con ventana emergente para descargar, abrir en reproductor externo o copiar enlace.
 // @author       KuroViolet57
@@ -11,10 +11,13 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
 // @grant        GM_setClipboard
+// @grant        GM_openInTab
 // @grant        GM_addStyle
+// @grant        GM_info
 // @grant        unsafeWindow
 // @connect      *
 // @run-at       document-start
@@ -25,15 +28,22 @@
  * Better Media Sniffer
  * --------------------
  * Works in userscript managers that expose the classic GM_* API (Via Browser,
- * Violentmonkey, Tampermonkey, etc). Everything degrades gracefully if a given
- * GM_* function is missing.
+ * XBrowser, Violentmonkey, Tampermonkey, etc). Everything degrades gracefully if
+ * a given GM_* function is missing.
  *
- * Notes for Via Browser (Android):
- *  - "Download": triggers a normal browser download so Via routes it to your
- *    selected download manager (Via internal / System / 1DM+ / ADM ...).
- *  - "Open in player": builds an android `intent:` URL. Pick a default player in
- *    Settings, or leave it on "Ask (system chooser)".
+ * Downloading on Android:
+ *  - "XBrowser / GM download": uses GM_download with a Referer header (fixes the
+ *    common "stuck in queue" caused by hotlink protection) and XBrowser's `tag`
+ *    subfolder feature. Recommended on XBrowser.
+ *  - "Direct download": fetches the file as a blob (GM_xmlhttpRequest, bypasses
+ *    CORS) and saves it. Recommended on Via.
+ *  - "Send to 1DM+/ADM": hands the real URL to that app via an android `intent:`.
+ *  - "Open in player": android `intent:` VIEW to a media player.
  *  - "Copy link": copies the direct media URL to the clipboard.
+ *
+ * On XBrowser the settings toggles are also mirrored into the native script menu
+ * (tap the menu entries to flip them) via GM_registerMenuCommand /
+ * GM_unregisterMenuCommand.
  */
 
 (function () {
@@ -59,12 +69,21 @@
             try { localStorage.setItem('__bms_' + key, JSON.stringify(val)); } catch (e) {}
         },
         registerMenu(label, fn) {
-            try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand(label, fn); } catch (e) {}
+            try { if (typeof GM_registerMenuCommand === 'function') return GM_registerMenuCommand(label, fn); } catch (e) {}
+            return null;
+        },
+        unregisterMenu(id) {
+            try { if (id != null && typeof GM_unregisterMenuCommand === 'function') GM_unregisterMenuCommand(id); } catch (e) {}
         },
         setClipboard(text) {
             try {
                 if (typeof GM_setClipboard === 'function') { GM_setClipboard(text, 'text'); return true; }
             } catch (e) {}
+            return false;
+        },
+        openInTab(url, background) {
+            try { if (typeof GM_openInTab === 'function') { GM_openInTab(url, background); return true; } } catch (e) {}
+            try { window.open(url, '_blank'); return true; } catch (e) {}
             return false;
         },
         xhr(opts) {
@@ -86,6 +105,19 @@
     };
 
     /* ------------------------------------------------------------------ *
+     *  Environment detection
+     * ------------------------------------------------------------------ */
+    const SCRIPT_HANDLER = (() => {
+        try { return (typeof GM_info !== 'undefined' && GM_info && GM_info.scriptHandler) || ''; } catch (e) { return ''; }
+    })();
+    const IS_XBROWSER = /x\s*-?browser|xbext/i.test(SCRIPT_HANDLER) || /XBrowser/i.test(navigator.userAgent || '');
+    const HAS_UNREGISTER = (typeof GM_unregisterMenuCommand === 'function');
+
+    function escAttr(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    /* ------------------------------------------------------------------ *
      *  Settings
      * ------------------------------------------------------------------ */
     const DEFAULT_SETTINGS = {
@@ -96,7 +128,10 @@
         captureNetwork: true,    // sniff media from fetch/XHR
         fetchSizes: true,        // HEAD requests to learn file size
         showFab: true,           // persistent corner launcher with detected count
-        downloadMethod: 'browser', // 'browser' | 'gm'
+        // 'gm' (GM_download+Referer) | 'browser' (blob) | '1dm' | 'adm' | 'intent'
+        // Default to the native GM download on XBrowser, blob elsewhere (Via).
+        downloadMethod: IS_XBROWSER ? 'gm' : 'browser',
+        gmTag: '',               // XBrowser GM_download subfolder tag ('' = none)
         playerPackage: '',       // android package for "open in player" ('' = chooser)
         playerLabel: 'Ask (system chooser)'
     };
@@ -439,6 +474,36 @@
         setTimeout(() => a.remove(), 0);
     }
 
+    // Referer often required by hotlink-protected media hosts. Sending it makes
+    // GM_download / GM_xmlhttpRequest succeed instead of getting a 403 (which on
+    // XBrowser shows up as a download stuck in the queue).
+    function refererHeaders() {
+        const h = {};
+        try { h.Referer = location.href; } catch (e) {}
+        return h;
+    }
+
+    // Native manager download (GM_download). On XBrowser this hands the file to
+    // its built-in downloader; `tag` puts it in a subfolder. Falls back to blob.
+    function gmDownload(item) {
+        if (item.blob) { blobDownload(item); return; }
+        const opts = {
+            url: item.url,
+            name: item.name || 'video',
+            headers: refererHeaders(),
+            onload() { toast('Downloaded: ' + item.name); },
+            onerror(e) {
+                const msg = (e && (e.error || e.details)) ? (': ' + (e.error || e.details)) : '';
+                toast('GM download failed' + msg + ' — trying direct');
+                blobDownload(item);
+            },
+            ontimeout() { toast('GM download timed out — trying direct'); blobDownload(item); }
+        };
+        if (settings.gmTag) opts.tag = settings.gmTag;
+        if (GM.download(opts)) toast('Sent to downloader…');
+        else blobDownload(item);
+    }
+
     // Fetch the file as a blob (GM.xhr bypasses CORS) and save it locally. This
     // forces a genuine download instead of the browser opening the video in a tab.
     function blobDownload(item) {
@@ -448,6 +513,7 @@
             method: 'GET',
             url: item.url,
             responseType: 'blob',
+            headers: refererHeaders(),
             timeout: 0,
             onprogress(e) {
                 if (e && e.lengthComputable) toast('Downloading ' + Math.round(e.loaded / e.total * 100) + '%');
@@ -482,11 +548,7 @@
 
     function downloadMedia(item) {
         switch (settings.downloadMethod) {
-            case 'gm':
-                if (!item.blob && GM.download({ url: item.url, name: item.name, onerror: () => blobDownload(item) })) {
-                    toast('Download started'); return;
-                }
-                blobDownload(item); return;
+            case 'gm': gmDownload(item); return;
             case '1dm': intentDownload(item, DL_PKGS['1dm']); return;
             case 'adm': intentDownload(item, DL_PKGS.adm); return;
             case 'intent': intentDownload(item, ''); return;
@@ -890,14 +952,18 @@
                     <input type="text" id="bms-custom-pkg" placeholder="com.example.player" value="${isCustom ? settings.playerPackage : ''}">
                 </div>
                 <div class="bms-row">
-                    <label>Download method<span class="bms-hint">"Send to 1DM+/ADM" hands the URL to that app. "Direct" saves the file in-browser.</span></label>
+                    <label>Download method<span class="bms-hint">GM download = manager with Referer (best on XBrowser). Direct = blob save (best on Via). 1DM+/ADM hand the URL to that app.</span></label>
                     <select data-s="downloadMethod">
-                        <option value="browser">Direct download (save file)</option>
+                        <option value="gm">GM download (manager + Referer)${IS_XBROWSER ? ' — recommended' : ''}</option>
+                        <option value="browser">Direct download (blob save)${IS_XBROWSER ? '' : ' — recommended'}</option>
                         <option value="1dm">Send to 1DM+</option>
                         <option value="adm">Send to ADM</option>
                         <option value="intent">Send to app (chooser)</option>
-                        <option value="gm">Userscript (GM_download)</option>
                     </select>
+                </div>
+                <div class="bms-row">
+                    <label>Download subfolder (tag)<span class="bms-hint">XBrowser only: GM download saves into this subfolder. Blank = default folder.</span></label>
+                    <input type="text" id="bms-gmtag" placeholder="e.g. Videos" value="${escAttr(settings.gmTag || '')}" style="max-width:150px">
                 </div>
                 <div class="bms-row">
                     <label>Minimum video size for button<span class="bms-hint">Skip tiny videos (px)</span></label>
@@ -954,6 +1020,8 @@
                 }
                 settings[key] = val;
             });
+            const tagEl = panel.querySelector('#bms-gmtag');
+            if (tagEl) settings.gmTag = (tagEl.value || '').trim();
             saveSettings();
             applySettings();
             closeSettings();
@@ -972,6 +1040,7 @@
     function applySettings() {
         repositionAllButtons();
         updateFab();
+        if (HAS_UNREGISTER) buildMenu();
     }
 
     /* ------------------------------------------------------------------ *
@@ -1025,6 +1094,12 @@
         scanMediaElements();
         updateFab();
 
+        // One-time nudge: on XBrowser the native GM download is the reliable path.
+        if (IS_XBROWSER && settings.downloadMethod !== 'gm' && !GM.getValue('xbHintShown', false)) {
+            GM.setValue('xbHintShown', true);
+            setTimeout(() => toast('XBrowser tip: set Download method to "GM download" (⚙️ or the menu) for reliable saves'), 3500);
+        }
+
         const mo = new MutationObserver(() => { scheduleScan(); });
         mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
 
@@ -1051,13 +1126,46 @@
     else document.addEventListener('DOMContentLoaded', boot);
 
     /* ------------------------------------------------------------------ *
-     *  Menu commands
+     *  Native menu (XBrowser/Tampermonkey) — toggles & cyclers.
+     *  GM_registerMenuCommand only takes (label, fn), so toggles are done by
+     *  re-registering with an updated label (needs GM_unregisterMenuCommand).
      * ------------------------------------------------------------------ */
-    GM.registerMenu('🎯 Media Sniffer — list', openList);
-    GM.registerMenu('⚙️ Media Sniffer — settings', openSettings);
+    const _menuIds = [];
+    const DL_LABELS = { gm: 'GM download', browser: 'Direct (blob)', '1dm': '1DM+', adm: 'ADM', intent: 'App chooser' };
+    const DL_ORDER = ['gm', 'browser', '1dm', 'adm', 'intent'];
+
+    function _reg(label, fn) { const id = GM.registerMenu(label, fn); if (id != null) _menuIds.push(id); }
+    function _clearMenu() {
+        if (!HAS_UNREGISTER) return;           // can't clear -> avoid duplicates
+        _menuIds.splice(0).forEach(id => GM.unregisterMenu(id));
+    }
+    function buildMenu() {
+        _clearMenu();
+        _reg('🎯 Open media list', openList);
+        _reg('⚙️ Open settings', openSettings);
+        _reg('⬇️ Download method: ' + (DL_LABELS[settings.downloadMethod] || settings.downloadMethod), cycleDownload);
+        _reg((settings.showFab ? '☑️' : '⬜') + ' Corner button', () => toggleSetting('showFab'));
+        _reg((settings.fetchSizes ? '☑️' : '⬜') + ' Fetch file sizes', () => toggleSetting('fetchSizes'));
+        _reg((settings.captureNetwork ? '☑️' : '⬜') + ' Network capture (reload)', () => toggleSetting('captureNetwork'));
+        _reg('🧹 Clear detected list', () => { store.length = 0; seen.clear(); emit(); toast('List cleared'); });
+    }
+    function toggleSetting(key) {
+        settings[key] = !settings[key]; saveSettings();
+        repositionAllButtons(); updateFab();
+        if (HAS_UNREGISTER) buildMenu();
+        toast(key + ': ' + (settings[key] ? 'on' : 'off'));
+    }
+    function cycleDownload() {
+        const i = DL_ORDER.indexOf(settings.downloadMethod);
+        settings.downloadMethod = DL_ORDER[(i + 1) % DL_ORDER.length];
+        saveSettings();
+        if (HAS_UNREGISTER) buildMenu();
+        toast('Download method: ' + DL_LABELS[settings.downloadMethod]);
+    }
+    buildMenu();
 
     // expose a tiny debug handle
     try {
-        window.BMS = { store, settings, openList, openSettings, addMedia };
+        window.BMS = { store, settings, openList, openSettings, addMedia, env: { IS_XBROWSER, SCRIPT_HANDLER, HAS_UNREGISTER } };
     } catch (e) {}
 })();
