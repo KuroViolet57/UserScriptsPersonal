@@ -2,7 +2,7 @@
 // @name         Better Media Sniffer
 // @name:es      Mejor Detector de Medios
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.3.0
+// @version      1.3.1
 // @description  A better media sniffer for Android userscript managers (Via Browser, etc). Detects videos/audio on the page, shows an organized list with size + extension filters, adds a floating button on video players that opens a resizable pop-up player with download / open-in-external-player / copy-link actions.
 // @description:es Detector de medios mejorado para navegadores Android. Detecta videos/audio, lista organizada con filtros por tamaño y extension, boton flotante sobre el reproductor con ventana emergente para descargar, abrir en reproductor externo o copiar enlace.
 // @author       KuroViolet57
@@ -534,15 +534,24 @@
         if (!req) { toast('GM_xmlhttpRequest unavailable — opening link'); anchorDownload(item); }
     }
 
+    // Build an android VIEW intent. Use a BROAD mime (video/* or audio/*): apps
+    // like VLC/MX register intent filters for video/* but not necessarily for a
+    // specific codec (video/webm), so an explicit package + exact mime resolves
+    // to nothing ("Allow" -> nothing happens). Broad mime matches reliably.
+    function broadType(item) { return item.kind === 'audio' ? 'audio/*' : 'video/*'; }
+    function buildViewIntent(url, pkg, title, mime) {
+        let intent = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
+        intent += 'type=' + encodeURIComponent(mime) + ';';
+        if (pkg) intent += 'package=' + pkg + ';';
+        if (title) intent += 'S.title=' + encodeURIComponent(title) + ';';
+        intent += 'end';
+        return intent;
+    }
+
     // Hand the real http(s) URL to an external app (1DM+, ADM, or a chooser).
     function intentDownload(item, pkg) {
         if (item.blob) { toast('Blob source can only be saved directly'); blobDownload(item); return; }
-        const mime = item.mime || MIME_MAP[item.ext] || (item.kind === 'audio' ? 'audio/*' : 'video/*');
-        let intent = 'intent:' + item.url + '#Intent;action=android.intent.action.VIEW;';
-        intent += 'type=' + encodeURIComponent(mime) + ';';
-        if (pkg) intent += 'package=' + pkg + ';';
-        intent += 'S.title=' + encodeURIComponent(item.name) + ';end';
-        try { window.location.href = intent; }
+        try { window.location.href = buildViewIntent(item.url, pkg, item.name, broadType(item)); }
         catch (e) { toast('No handler, downloading directly'); blobDownload(item); }
     }
 
@@ -559,13 +568,13 @@
 
     function openInPlayer(item) {
         if (item.blob) { toast('Blob source can only be played in-page'); return; }
-        const mime = item.mime || MIME_MAP[item.ext] || (item.kind === 'audio' ? 'audio/*' : 'video/*');
-        let intent = 'intent:' + item.url + '#Intent;action=android.intent.action.VIEW;';
-        intent += 'type=' + encodeURIComponent(mime) + ';';
-        if (settings.playerPackage) intent += 'package=' + settings.playerPackage + ';';
-        intent += 'S.title=' + encodeURIComponent(item.name) + ';end';
         try {
-            window.location.href = intent;
+            window.location.href = buildViewIntent(item.url, settings.playerPackage, item.name, broadType(item));
+            if (settings.playerPackage) {
+                // If the chosen app doesn't launch (not installed / filter mismatch),
+                // the user gets a silent no-op; hint at the reliable fallback.
+                setTimeout(() => toast('If nothing opened, try player = "Ask (system chooser)"'), 1500);
+            }
         } catch (e) {
             window.open(item.url, '_blank');
         }

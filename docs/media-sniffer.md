@@ -98,9 +98,19 @@ The download methods avoid that:
 
 ### Open in player
 
-Builds `intent:<url>#Intent;action=VIEW;type=<mime>;package=<pkg>;end`. Pick your
+Builds `intent:<url>#Intent;action=VIEW;type=video/*;package=<pkg>;end`. Pick your
 player in Settings (MX Player, VLC, Just Player, nPlayer, Web Video Cast, or a
 custom package name), or leave it on **Ask (system chooser)**.
+
+The intent uses a **broad `video/*` / `audio/*` MIME** on purpose: players like
+VLC/MX register intent filters for `video/*` but not always for a specific codec
+(e.g. `video/webm`), so sending the exact codec MIME with an explicit package can
+resolve to nothing — you tap "Allow" and the app never opens. Broad MIME matches
+reliably.
+
+> If a specific player still doesn't launch (not installed, or an unusual
+> package/filter), switch the player to **Ask (system chooser)** — Android then
+> lists whatever apps can handle it, which always works.
 
 ## Notes & limitations
 
