@@ -2,7 +2,7 @@
 // @name         Better Media Sniffer
 // @name:es      Mejor Detector de Medios
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.4.0
+// @version      1.4.1
 // @description  A better media sniffer for Android userscript managers (Via Browser, etc). Detects videos/audio on the page, shows an organized list with size + extension filters, adds a floating button on video players that opens a resizable pop-up player with download / open-in-external-player / copy-link actions.
 // @description:es Detector de medios mejorado para navegadores Android. Detecta videos/audio, lista organizada con filtros por tamaño y extension, boton flotante sobre el reproductor con ventana emergente para descargar, abrir en reproductor externo o copiar enlace.
 // @author       KuroViolet57
@@ -17,7 +17,6 @@
 // @grant        GM_setClipboard
 // @grant        GM_openInTab
 // @grant        GM_addStyle
-// @grant        GM_info
 // @grant        unsafeWindow
 // @connect      *
 // @run-at       document-start
