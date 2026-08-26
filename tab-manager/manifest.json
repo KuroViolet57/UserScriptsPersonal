@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Vault",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tab, group and window manager: live tab list, tab groups, saved sessions, and automatic capture of closed windows/tabs so you can always reopen them.",
   "permissions": [
     "tabs",

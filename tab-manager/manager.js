@@ -85,10 +85,7 @@ function askText(title, initial, extra) {
 async function loadLive() {
     const wins = await chrome.windows.getAll({ populate: true });
     const cur = await chrome.windows.getCurrent().catch(() => null);
-    state.groups = [];
-    if (HAS_GROUPS) {
-        try { state.groups = await chrome.tabGroups.query({}); } catch (e) { state.groups = []; }
-    }
+
     state.windows = wins.map(w => ({
         id: w.id,
         focused: !!w.focused,
@@ -99,6 +96,36 @@ async function loadLive() {
             groupId: (t.groupId == null ? -1 : t.groupId), windowId: t.windowId, active: !!t.active
         }))
     }));
+
+    state.groups = [];
+    state.groupSource = 'none';
+    state.groupError = '';
+
+    if (HAS_GROUPS) {
+        try {
+            const g = await chrome.tabGroups.query({});
+            if (g && g.length) { state.groups = g; state.groupSource = 'api'; }
+        } catch (e) {
+            state.groupError = String((e && e.message) || e);
+        }
+    }
+
+    // Fallback: some builds (notably Android) group tabs in their own native UI
+    // without surfacing them through tabGroups.query(), yet the tabs still carry
+    // a groupId. Reconstruct groups from that so they're at least manageable.
+    if (!state.groups.length) {
+        const seen = new Map();
+        for (const w of state.windows) {
+            for (const t of w.tabs) {
+                if (t.groupId != null && t.groupId !== -1 && !seen.has(t.groupId)) {
+                    seen.set(t.groupId, {
+                        id: t.groupId, windowId: w.id, title: '', color: 'grey', synthesized: true
+                    });
+                }
+            }
+        }
+        if (seen.size) { state.groups = Array.from(seen.values()); state.groupSource = 'tabs'; }
+    }
 }
 
 function groupOf(id) { return state.groups.find(g => g.id === id); }
@@ -196,50 +223,59 @@ function renderOpen() {
 async function renderGroups() {
     const box = $('#sec-groups'); box.innerHTML = '';
 
-    if (!HAS_GROUPS) {
+    const live = state.groups || [];
+    const h = el('div', 'cm'); h.textContent = 'LIVE GROUPS';
+    h.style.cssText = 'font-weight:700;letter-spacing:.5px;margin:2px 0 8px';
+    box.appendChild(h);
+
+    if (state.groupSource === 'tabs') {
         const n = el('div', 'card');
-        n.innerHTML = '<div class="cm">⚠️ This browser build doesn\'t expose the tab-groups API, so live groups are unavailable. Saved groups below still work everywhere — they restore as a set of tabs.</div>';
+        n.innerHTML = '<div class="cm">ℹ️ Your browser groups tabs in its own UI without reporting the groups to extensions, so these were <b>reconstructed from the tabs themselves</b>. Names and colours aren\'t available — everything else works.</div>';
         box.appendChild(n);
-    } else {
-        const live = state.groups;
-        const h = el('div', 'cm'); h.textContent = 'LIVE GROUPS'; h.style.cssText = 'font-weight:700;letter-spacing:.5px;margin:2px 0 8px';
-        box.appendChild(h);
-        if (!live.length) {
-            const e = el('div', 'empty'); e.textContent = 'No tab groups yet. Select tabs in “Open” and tap 🗂 Group.';
-            box.appendChild(e);
-        }
-        for (const g of live) {
-            const tabs = state.windows.flatMap(w => w.tabs).filter(t => t.groupId === g.id);
-            const c = el('div', 'card');
-            const ch = el('div', 'ch');
-            const badge = el('span', 'gbadge g-' + (g.color || 'grey'));
-            badge.textContent = g.title || 'untitled';
-            const ct = el('span', 'ct'); ct.textContent = `${tabs.length} tab${tabs.length === 1 ? '' : 's'}`;
-            ch.appendChild(badge); ch.appendChild(ct); c.appendChild(ch);
+    } else if (!live.length) {
+        const n = el('div', 'card');
+        n.innerHTML = HAS_GROUPS
+            ? '<div class="cm">⚠️ No groups reported by the browser, and no tabs carry a group id. If you can see a group in the browser\'s own tab switcher, it isn\'t exposed to extensions on this build — run <b>Diagnostics</b> in ⚙ settings and send me the result.</div>'
+            : '<div class="cm">⚠️ This build doesn\'t expose the tab-groups API at all. Saved groups below still work — they restore as a set of tabs.</div>';
+        box.appendChild(n);
+    }
 
-            const cu = el('div', 'cu');
-            cu.textContent = tabs.slice(0, 4).map(t => t.title || host(t.url)).join(' · ');
-            c.appendChild(cu);
+    for (const g of live) {
+        const tabs = state.windows.flatMap(w => w.tabs).filter(t => t.groupId === g.id);
+        const c = el('div', 'card');
+        const ch = el('div', 'ch');
+        const badge = el('span', 'gbadge g-' + (g.color || 'grey'));
+        badge.textContent = g.title || (g.synthesized ? 'Group #' + g.id : 'untitled');
+        const ct = el('span', 'ct'); ct.textContent = `${tabs.length} tab${tabs.length === 1 ? '' : 's'}`;
+        ch.appendChild(badge); ch.appendChild(ct); c.appendChild(ch);
 
-            const cb = el('div', 'cb');
+        const cu = el('div', 'cu');
+        cu.textContent = tabs.slice(0, 4).map(t => t.title || host(t.url)).join(' · ');
+        c.appendChild(cu);
+
+        const cb = el('div', 'cb');
+        if (!g.synthesized) {
             cb.appendChild(mk('Rename', async () => {
                 const r = await askText('Rename group', g.title || '', { colors: true, color: g.color });
                 if (!r) return;
-                await chrome.tabGroups.update(g.id, { title: r.text, color: r.color });
+                try { await chrome.tabGroups.update(g.id, { title: r.text, color: r.color }); }
+                catch (e) { toast('Rename failed: ' + (e.message || e)); }
                 render();
             }));
-            cb.appendChild(mk('Save', () => saveGroup(g, tabs)));
-            cb.appendChild(mk('Select', () => { tabs.forEach(t => state.selected.add(t.id)); state.section = 'open'; render(); }));
-            cb.appendChild(mk('Ungroup', async () => {
-                await chrome.tabs.ungroup(tabs.map(t => t.id)); render();
-            }));
-            cb.appendChild(mk('Close', async () => {
-                if (!await confirmBox(`Close ${tabs.length} tab(s) in this group?`)) return;
-                await chrome.tabs.remove(tabs.map(t => t.id)); render();
-            }, 'd'));
-            c.appendChild(cb);
-            box.appendChild(c);
         }
+        cb.appendChild(mk('Save', () => saveGroup(g, tabs), 'p'));
+        cb.appendChild(mk('Select', () => { tabs.forEach(t => state.selected.add(t.id)); state.section = 'open'; render(); }));
+        cb.appendChild(mk('Ungroup', async () => {
+            try { await chrome.tabs.ungroup(tabs.map(t => t.id)); }
+            catch (e) { toast('Ungroup failed: ' + (e.message || e)); }
+            render();
+        }));
+        cb.appendChild(mk('Close', async () => {
+            if (!await confirmBox(`Close ${tabs.length} tab(s) in this group?`)) return;
+            await chrome.tabs.remove(tabs.map(t => t.id)); render();
+        }, 'd'));
+        c.appendChild(cb);
+        box.appendChild(c);
     }
 
     const saved = await get(K.SAVED_GROUPS, []);
@@ -396,7 +432,18 @@ async function renderSettings() {
       <div class="field"><button class="btn" id="s-export" style="width:100%">⬇ Export all data (JSON)</button>
         <div class="h">Sessions, saved groups and closed history.</div></div>
       <div class="field"><button class="btn d" id="s-clearclosed" style="width:100%">🗑 Clear closed history</button></div>
-      <div class="field"><div class="h">Tab groups API: <b>${HAS_GROUPS ? 'available' : 'NOT available on this build'}</b></div></div>`;
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+      <div class="field">
+        <label>Diagnostics</label>
+        <div class="h">Tab groups API: <b>${HAS_GROUPS ? 'available' : 'NOT available on this build'}</b></div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn" id="s-diag" style="flex:1">🔍 Run diagnostics</button>
+          <button class="btn" id="s-diagcopy" style="flex:0 0 auto">📋</button>
+        </div>
+        <pre id="s-diagout" style="display:none;background:var(--bg);border:1px solid var(--line);
+          border-radius:9px;padding:10px;margin-top:8px;font-size:10.5px;line-height:1.5;
+          white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto"></pre>
+      </div>`;
 
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
@@ -422,6 +469,76 @@ async function renderSettings() {
         if (!await confirmBox('Clear all closed windows and tabs?')) return;
         await set(K.CLOSED_WINDOWS, []); await set(K.CLOSED_TABS, []); render();
     };
+    $('#s-diag').onclick = async () => {
+        const out = $('#s-diagout');
+        out.style.display = 'block';
+        out.textContent = 'Running…';
+        out.textContent = await runDiagnostics();
+    };
+    $('#s-diagcopy').onclick = async () => {
+        const out = $('#s-diagout');
+        const text = (out.textContent && out.textContent !== 'Running…') ? out.textContent : await runDiagnostics();
+        out.style.display = 'block'; out.textContent = text;
+        navigator.clipboard.writeText(text).then(() => toast('Diagnostics copied'), () => toast('Copy failed'));
+    };
+}
+
+/* Report exactly what this browser exposes, so group problems can be pinned
+ * down instead of guessed at. */
+async function runDiagnostics() {
+    try { await loadLive(); } catch (e) {}   // make the reported source current
+    const L = [];
+    const add = (k, v) => L.push(k.padEnd(26) + ': ' + v);
+
+    add('userAgent', (navigator.userAgent || '').slice(0, 120));
+    add('chrome.tabGroups', typeof chrome.tabGroups);
+    add('tabGroups.query', typeof (chrome.tabGroups && chrome.tabGroups.query));
+    add('tabGroups.update', typeof (chrome.tabGroups && chrome.tabGroups.update));
+    add('chrome.tabs.group', typeof (chrome.tabs && chrome.tabs.group));
+    add('chrome.tabs.ungroup', typeof (chrome.tabs && chrome.tabs.ungroup));
+    add('chrome.windows.create', typeof (chrome.windows && chrome.windows.create));
+    add('chrome.bookmarks', typeof chrome.bookmarks);
+    add('HAS_GROUPS (detected)', String(HAS_GROUPS));
+
+    let q = 'not called';
+    if (chrome.tabGroups && chrome.tabGroups.query) {
+        try {
+            const g = await chrome.tabGroups.query({});
+            q = (g ? g.length : 0) + ' group(s)';
+            if (g && g.length) q += ' → ' + JSON.stringify(g);
+        } catch (e) { q = 'ERROR: ' + ((e && e.message) || e); }
+    }
+    add('tabGroups.query({})', q);
+
+    try {
+        const tabs = await chrome.tabs.query({});
+        const wins = await chrome.windows.getAll({});
+        add('total tabs / windows', tabs.length + ' / ' + wins.length);
+        const counts = {};
+        let hasProp = 0;
+        tabs.forEach(t => {
+            if ('groupId' in t) hasProp++;
+            const g = (t.groupId == null) ? 'missing' : String(t.groupId);
+            counts[g] = (counts[g] || 0) + 1;
+        });
+        add('tabs with groupId prop', hasProp + ' / ' + tabs.length);
+        add('groupId distribution', JSON.stringify(counts));
+        const grouped = tabs.filter(t => t.groupId != null && t.groupId !== -1);
+        add('tabs in a group (id!=-1)', String(grouped.length));
+        if (grouped.length) {
+            add('sample grouped tab', JSON.stringify({
+                groupId: grouped[0].groupId, windowId: grouped[0].windowId,
+                title: (grouped[0].title || '').slice(0, 40)
+            }));
+        }
+        add('windows reported', JSON.stringify(wins.map(w => ({ id: w.id, type: w.type }))));
+    } catch (e) {
+        add('tabs.query ERROR', String((e && e.message) || e));
+    }
+
+    add('group source used', state.groupSource || 'none');
+    if (state.groupError) add('group load error', state.groupError);
+    return L.join('\n');
 }
 
 /* ------------------------------ actions ------------------------------ */

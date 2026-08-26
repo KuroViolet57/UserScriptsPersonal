@@ -89,10 +89,18 @@ That ordering is covered by tests in the repo's scratch harness.
 
 - Only `http(s)` URLs are captured/restored — internal pages (`chrome://`,
   `about:`) refuse to be reopened programmatically.
-- **`chrome.tabGroups` may be missing** on some Android Chromium builds. The
-  extension feature-detects it: live groups are hidden, "Group" falls back to
-  creating a *saved* group, and everything else works unchanged. Settings shows
-  which you have.
+- **`chrome.tabGroups` may be missing or inert** on some Android Chromium builds.
+  Many of them group tabs in their *own* native UI without reporting those groups
+  to extensions, so a group you can plainly see may return nothing from
+  `tabGroups.query()`. Three-stage handling:
+  1. Use the API when it reports groups.
+  2. Otherwise **reconstruct groups from the tabs' own `groupId`** — names and
+     colours are unavailable, but selecting/saving/ungrouping/closing all work.
+  3. If neither yields anything, "Group" falls back to creating a *saved* group.
+
+  **⚙ Settings → Run diagnostics** prints exactly what your browser exposes
+  (API presence, `tabGroups.query()` result, the `groupId` distribution across
+  your tabs, window list) with a 📋 button to copy it.
 - Very large restores run in the service worker (not the popup) so they survive
   the popup closing; keep the batch delay ≤ 20 s so the worker stays alive.
 - `chrome.windows` behaves differently across Android browsers — some treat
