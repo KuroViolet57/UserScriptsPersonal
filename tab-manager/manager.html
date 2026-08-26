@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tab Vault</title>
+<link rel="stylesheet" href="manager.css">
+</head>
+<body>
+
+<header>
+    <span class="logo">🗄️</span>
+    <h1>Tab Vault</h1>
+    <button class="icon" id="expand" title="Open in a full tab">⛶</button>
+    <button class="icon" id="refresh" title="Refresh">⟳</button>
+</header>
+
+<nav id="nav">
+    <button class="on" data-sec="open">Open <em id="c-open"></em></button>
+    <button data-sec="groups">Groups <em id="c-groups"></em></button>
+    <button data-sec="closed">Closed <em id="c-closed"></em></button>
+    <button data-sec="saved">Saved <em id="c-saved"></em></button>
+    <button data-sec="settings">⚙</button>
+</nav>
+
+<div id="searchbar">
+    <input id="search" type="search" placeholder="Search title or URL…">
+    <button class="icon" id="selall" title="Select all shown">☑</button>
+    <button class="icon" id="selnone" title="Clear selection">☐</button>
+</div>
+
+<main id="main">
+    <section id="sec-open" class="sec"></section>
+    <section id="sec-groups" class="sec hidden"></section>
+    <section id="sec-closed" class="sec hidden"></section>
+    <section id="sec-saved" class="sec hidden"></section>
+    <section id="sec-settings" class="sec hidden"></section>
+</main>
+
+<div id="jobbar" class="hidden">
+    <span id="jobtext"></span>
+    <button class="link" id="jobcancel">Cancel</button>
+</div>
+
+<footer id="actions" class="hidden">
+    <div class="selinfo"><b id="selcount">0</b> selected</div>
+    <div class="btns">
+        <button class="btn p" data-act="session">💾 Save session</button>
+        <button class="btn" data-act="group">🗂 Group</button>
+        <button class="btn" data-act="window">🪟 To new window</button>
+        <button class="btn" data-act="bookmark">⭐ Bookmark</button>
+        <button class="btn" data-act="copy">📋 Copy</button>
+        <button class="btn d" data-act="close">✕ Close tabs</button>
+    </div>
+</footer>
+
+<div id="toast"></div>
+
+<script src="manager.js"></script>
+</body>
+</html>

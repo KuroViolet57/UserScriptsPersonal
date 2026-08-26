@@ -13,6 +13,15 @@ Personal userscripts for Android browsers with a built-in userscript manager
 Open your browser's userscript manager and add the raw `*.user.js` file, or paste
 its contents. See each script's docs page for details.
 
+## Browser extensions
+
+| Extension | Description | Docs |
+| --- | ----------- | ---- |
+| [`tab-manager/`](tab-manager/) | **Tab Vault** — tab, group and window manager. Live tab list, real tab groups, saved sessions, and automatic capture of closed windows/tabs so you can always reopen them. | [readme](tab-manager/README.md) |
+
+Manifest V3. Load it unpacked (or as a zip) in any Chromium browser that allows
+local extensions.
+
 ## Web apps
 
 | App | Description | Docs |

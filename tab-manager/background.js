@@ -1,0 +1,251 @@
+/* ==========================================================================
+ * Tab Vault — background service worker
+ *
+ * Two jobs:
+ *  1. Keep a PERSISTED mirror of every window and its tabs. MV3 service
+ *     workers are killed when idle, so the mirror lives in chrome.storage,
+ *     not memory — otherwise a window closing after a sleep would be lost.
+ *  2. Capture windows/tabs at the moment they close (using that mirror, since
+ *     by the time onRemoved fires the real thing is already gone) so they can
+ *     be reopened later — the Brave-style "reopen closed window".
+ * ========================================================================== */
+'use strict';
+
+const K = {
+    MIRROR: 'mirror',
+    CLOSED_WINDOWS: 'closedWindows',
+    CLOSED_TABS: 'closedTabs',
+    SESSIONS: 'sessions',
+    SAVED_GROUPS: 'savedGroups',
+    SETTINGS: 'settings',
+    OPEN_JOB: 'openJob'
+};
+
+const DEFAULT_SETTINGS = {
+    batchSize: 10,
+    batchDelaySec: 3,
+    captureClosed: true,
+    maxClosedWindows: 50,
+    maxClosedTabs: 300
+};
+
+/* ------------------------------ storage ------------------------------ */
+function get(key, def) {
+    return new Promise(res => chrome.storage.local.get({ [key]: def }, o => res(o[key])));
+}
+function set(key, val) {
+    return new Promise(res => chrome.storage.local.set({ [key]: val }, () => res()));
+}
+async function getSettings() {
+    return Object.assign({}, DEFAULT_SETTINGS, await get(K.SETTINGS, {}));
+}
+
+/* Only http(s) can be reliably restored; internal pages refuse to reopen. */
+function isRestorable(url) { return /^https?:\/\//i.test(url || ''); }
+
+function slimTab(t) {
+    return {
+        id: t.id,
+        url: t.url || t.pendingUrl || '',
+        title: t.title || '',
+        favIconUrl: t.favIconUrl || '',
+        pinned: !!t.pinned,
+        groupId: (t.groupId == null ? -1 : t.groupId),
+        index: t.index,
+        windowId: t.windowId,
+        active: !!t.active
+    };
+}
+
+/* --------------------------- window mirror --------------------------- */
+let rebuildTimer = null;
+function scheduleRebuild(delay) {
+    if (rebuildTimer) clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => { rebuildTimer = null; rebuildMirror(); }, delay || 400);
+}
+
+async function rebuildMirror() {
+    try {
+        const tabs = await chrome.tabs.query({});
+        const mirror = {};
+        for (const t of tabs) {
+            const w = mirror[t.windowId] || (mirror[t.windowId] = { id: t.windowId, tabs: [], groups: [] });
+            w.tabs.push(slimTab(t));
+        }
+        if (chrome.tabGroups) {
+            try {
+                const groups = await chrome.tabGroups.query({});
+                for (const g of groups) {
+                    const w = mirror[g.windowId];
+                    if (w) w.groups.push({ id: g.id, title: g.title || '', color: g.color, collapsed: !!g.collapsed });
+                }
+            } catch (e) { /* tabGroups unsupported on this build */ }
+        }
+        const now = Date.now();
+        for (const id in mirror) mirror[id].updatedAt = now;
+        await set(K.MIRROR, mirror);
+    } catch (e) { /* transient */ }
+}
+
+/* --------------------------- closed capture --------------------------- */
+async function pushClosedWindow(win) {
+    const s = await getSettings();
+    if (!s.captureClosed) return;
+    const tabs = (win.tabs || []).filter(t => isRestorable(t.url));
+    if (!tabs.length) return;
+
+    // Preserve group membership by name so a restored window can regroup.
+    const groupById = {};
+    for (const g of (win.groups || [])) groupById[g.id] = g;
+
+    const list = await get(K.CLOSED_WINDOWS, []);
+    list.unshift({
+        id: 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        closedAt: Date.now(),
+        tabs: tabs.map(t => ({
+            url: t.url,
+            title: t.title,
+            pinned: t.pinned,
+            group: groupById[t.groupId] ? { title: groupById[t.groupId].title, color: groupById[t.groupId].color } : null
+        }))
+    });
+    await set(K.CLOSED_WINDOWS, list.slice(0, s.maxClosedWindows));
+}
+
+async function pushClosedTab(tab) {
+    const s = await getSettings();
+    if (!s.captureClosed || !isRestorable(tab.url)) return;
+    const list = await get(K.CLOSED_TABS, []);
+    // de-dupe consecutive identical closes
+    if (list.length && list[0].url === tab.url) list.shift();
+    list.unshift({
+        id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        closedAt: Date.now(),
+        url: tab.url,
+        title: tab.title,
+        favIconUrl: tab.favIconUrl || ''
+    });
+    await set(K.CLOSED_TABS, list.slice(0, s.maxClosedTabs));
+}
+
+/* ------------------------------ events ------------------------------ */
+/* Listeners must be registered synchronously at top level so the service
+ * worker wakes for them after being suspended. */
+chrome.tabs.onCreated.addListener(() => scheduleRebuild());
+chrome.tabs.onMoved.addListener(() => scheduleRebuild());
+chrome.tabs.onAttached.addListener(() => scheduleRebuild());
+chrome.tabs.onDetached.addListener(() => scheduleRebuild());
+chrome.tabs.onReplaced.addListener(() => scheduleRebuild());
+chrome.tabs.onUpdated.addListener((id, info) => {
+    if (info.url || info.title || info.status === 'complete' || info.groupId != null) scheduleRebuild();
+});
+chrome.windows.onCreated.addListener(() => scheduleRebuild());
+
+if (chrome.tabGroups) {
+    try {
+        chrome.tabGroups.onCreated.addListener(() => scheduleRebuild());
+        chrome.tabGroups.onUpdated.addListener(() => scheduleRebuild());
+        chrome.tabGroups.onRemoved.addListener(() => scheduleRebuild());
+    } catch (e) {}
+}
+
+chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+    // When a whole window goes, the window handler captures it as one unit —
+    // and we must NOT rebuild the mirror here, or the window's tab list would
+    // be emptied before windows.onRemoved gets to read it.
+    if (removeInfo && removeInfo.isWindowClosing) return;
+    try {
+        const mirror = await get(K.MIRROR, {});
+        for (const wid in mirror) {
+            const t = (mirror[wid].tabs || []).find(x => x.id === tabId);
+            if (t) { await pushClosedTab(t); break; }
+        }
+    } catch (e) {}
+    scheduleRebuild();
+});
+
+chrome.windows.onRemoved.addListener(async (windowId) => {
+    try {
+        const mirror = await get(K.MIRROR, {});
+        const win = mirror[windowId];
+        if (win) {
+            await pushClosedWindow(win);
+            delete mirror[windowId];
+            await set(K.MIRROR, mirror);
+        }
+    } catch (e) {}
+    scheduleRebuild(900);
+});
+
+chrome.runtime.onStartup.addListener(() => rebuildMirror());
+chrome.runtime.onInstalled.addListener(() => rebuildMirror());
+
+/* --------------------------- batched opening ---------------------------
+ * Run from the worker (not the popup) so it survives the popup closing.
+ * Each batch is an API call, which resets the worker's idle timer, so a
+ * delay below ~20s keeps it alive for the whole job.
+ * --------------------------------------------------------------------- */
+let job = null;
+
+async function runOpenJob(urls, mode, windowId) {
+    if (job) return { ok: false, error: 'A restore is already running' };
+    const s = await getSettings();
+
+    if (mode === 'window') {
+        const chunk = urls.slice(0, 30);
+        const win = await chrome.windows.create({ url: chunk });
+        for (let i = 30; i < urls.length; i++) {
+            await chrome.tabs.create({ url: urls[i], windowId: win.id, active: false });
+        }
+        return { ok: true, opened: urls.length };
+    }
+
+    if (mode === 'all') {
+        for (const u of urls) {
+            try { await chrome.tabs.create({ url: u, active: false, windowId }); } catch (e) {}
+        }
+        return { ok: true, opened: urls.length };
+    }
+
+    // batched
+    job = { total: urls.length, done: 0, cancelled: false };
+    const batch = Math.max(1, s.batchSize | 0);
+    const delay = Math.max(0, Math.min(20, s.batchDelaySec)) * 1000;
+
+    const step = async () => {
+        if (!job || job.cancelled) { job = null; await set(K.OPEN_JOB, null); return; }
+        const end = Math.min(job.done + batch, urls.length);
+        for (; job.done < end; job.done++) {
+            try { await chrome.tabs.create({ url: urls[job.done], active: false, windowId }); } catch (e) {}
+        }
+        await set(K.OPEN_JOB, { done: job.done, total: job.total });
+        if (job.done < urls.length) setTimeout(step, delay);
+        else { job = null; await set(K.OPEN_JOB, null); }
+    };
+    step();
+    return { ok: true, started: true, total: urls.length };
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    (async () => {
+        try {
+            if (msg.type === 'openUrls') {
+                sendResponse(await runOpenJob(msg.urls || [], msg.mode || 'batch', msg.windowId));
+            } else if (msg.type === 'cancelOpen') {
+                if (job) job.cancelled = true;
+                await set(K.OPEN_JOB, null);
+                sendResponse({ ok: true });
+            } else if (msg.type === 'rebuild') {
+                await rebuildMirror();
+                sendResponse({ ok: true });
+            } else {
+                sendResponse({ ok: false, error: 'unknown message' });
+            }
+        } catch (e) {
+            sendResponse({ ok: false, error: String((e && e.message) || e) });
+        }
+    })();
+    return true;  // keep the channel open for the async reply
+});
+
+rebuildMirror();
