@@ -2,8 +2,8 @@
 // @name         Via Tab Saver / Session Exporter
 // @name:es      Guardar Pestañas / Exportar Sesión
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.0.0
-// @description  Works around Via's lack of tab management. Auto-logs every page you open into one shared list (GM storage is shared across all tabs), so from any tab you can review every open/recent tab and export them all to a Netscape bookmarks.html file, JSON, or the clipboard.
+// @version      1.1.0
+// @description  Works around Via's lack of tab management. Auto-logs every page you open into one shared list (GM storage is shared across all tabs), so from any tab you can review every open/recent tab, export them all to a Netscape bookmarks.html file, JSON, or the clipboard — and bulk-reopen a selection, all at once or in batches.
 // @description:es Solución para la falta de gestión de pestañas en Via. Registra automaticamente cada pagina que abres en una lista compartida y te permite exportarlas todas a un archivo de marcadores (bookmarks.html), JSON o al portapapeles.
 // @author       KuroViolet57
 // @match        *://*/*
@@ -11,6 +11,7 @@
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
+// @grant        GM_openInTab
 // @grant        GM_addStyle
 // @run-at       document-idle
 // @noframes
@@ -44,6 +45,10 @@
         },
         menu(l, f) { try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand(l, f); } catch (e) {} },
         clip(t) { try { if (typeof GM_setClipboard === 'function') { GM_setClipboard(t, 'text'); return true; } } catch (e) {} return false; },
+        openInTab(url, bg) {
+            try { if (typeof GM_openInTab === 'function') { GM_openInTab(url, bg); return true; } } catch (e) {}
+            try { return !!window.open(url, '_blank'); } catch (e) { return false; }
+        },
         style(c) {
             try { if (typeof GM_addStyle === 'function') { GM_addStyle(c); return; } } catch (e) {}
             const s = document.createElement('style'); s.textContent = c; (document.head || document.documentElement).appendChild(s);
@@ -59,6 +64,8 @@
         heartbeat: true,
         activeMinutes: 30,   // "recently active" window
         maxEntries: 800,
+        batchSize: 10,       // bulk-open: tabs per batch
+        batchDelaySec: 3,    // bulk-open: pause between batches
         exclude: ''          // comma/newline separated URL substrings to skip
     };
     let settings = Object.assign({}, DEFAULTS, GM.getValue('settings', {}));
@@ -145,6 +152,9 @@
     .vts-it-actions{display:flex;gap:2px;flex:0 0 auto}
     .vts-ib{background:none;border:none;font-size:16px;padding:4px 6px;color:#aaa}
     .vts-ib.pin.on{color:#ffcf4d}
+    .vts-openbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#1d2a3a;font-size:12px;
+        color:#9fc3ef;border-top:1px solid #2a2a32}
+    .vts-openbar span{flex:1}
     .vts-foot{display:flex;gap:8px;padding:10px 14px;background:#24242c;flex-wrap:wrap;border-top:1px solid #2a2a32}
     .vts-btn{border:none;border-radius:9px;padding:11px 12px;font-size:13px;font-weight:700;flex:1;min-width:120px}
     .vts-btn.b{background:#1e88e5;color:#fff}.vts-btn.g{background:#2ea043;color:#fff}
@@ -237,7 +247,12 @@
                     <span data-a="count"></span>
                 </div>
                 <div class="vts-body" id="vts-body"></div>
+                <div class="vts-openbar" id="vts-openbar" style="display:none">
+                    <span id="vts-open-status"></span>
+                    <button class="vts-link" data-a="cancelopen">Cancel</button>
+                </div>
                 <div class="vts-foot">
+                    <button class="vts-btn b" data-a="open">🚀 Open tabs</button>
                     <button class="vts-btn g" data-a="bookmarks">⭐ Bookmarks.html</button>
                     <button class="vts-btn b" data-a="json">⬇ JSON</button>
                     <button class="vts-btn s" data-a="copy">📋 Copy URLs</button>
@@ -252,11 +267,14 @@
         overlay.querySelector('[data-f="query"]').addEventListener('input', e => { view.query = e.target.value; renderList(); });
         overlay.querySelector('[data-a="all"]').onclick = () => { currentEntries().forEach(e => selected.add(e.url)); renderList(); };
         overlay.querySelector('[data-a="none"]').onclick = () => { selected.clear(); renderList(); };
+        overlay.querySelector('[data-a="open"]').onclick = chooseOpenTabs;
+        overlay.querySelector('[data-a="cancelopen"]').onclick = () => stopOpenTabs(true);
         overlay.querySelector('[data-a="bookmarks"]').onclick = exportBookmarks;
         overlay.querySelector('[data-a="json"]').onclick = exportJson;
         overlay.querySelector('[data-a="copy"]').onclick = copyUrls;
         overlay.querySelector('[data-a="del"]').onclick = deleteSelected;
         renderList();
+        if (openQueue) setOpenBar(true);
     }
     function closeManager() { if (overlay) { overlay.remove(); overlay = null; } }
 
@@ -347,6 +365,95 @@
         removeTabs(Array.from(selected)); selected.clear(); renderList(); updateFab();
     }
 
+    /* ------------------------- Bulk-open (restore tabs) ------------------------- */
+    // Opens in background tabs via GM_openInTab so this page (and the queue)
+    // keeps running. window.open fallback counts popup-blocked tabs as fails.
+    let openQueue = null;   // {urls, idx, timer, fails, mode}
+    const OPEN_STAGGER_MS = 150;   // small gap between tabs, even in "all" mode
+    const OPEN_ALL_LIMIT = 10;     // up to this many: open immediately, no dialog
+
+    function chooseOpenTabs() {
+        const entries = selectedOrShown();
+        if (!entries.length) { toast('Nothing to open'); return; }
+        if (openQueue) { toast('Already opening — cancel that first'); return; }
+        if (entries.length <= OPEN_ALL_LIMIT) { startOpenTabs(entries, 'all'); return; }
+
+        const batch = settings.batchSize, pause = settings.batchDelaySec;
+        const ov = document.createElement('div');
+        ov.className = 'vts-ov';
+        ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+        ov.innerHTML = `
+            <div class="vts-panel" style="width:min(92vw,360px)">
+                <div class="vts-head"><span>🚀 Open ${entries.length} tabs</span></div>
+                <div class="vts-body" style="padding:14px">
+                    <button class="vts-btn b" style="width:100%;margin-bottom:8px" data-a="all">⚡ All at once</button>
+                    <button class="vts-btn g" style="width:100%;margin-bottom:8px" data-a="batch">⏳ In batches of ${batch} every ${pause}s</button>
+                    <button class="vts-btn s" style="width:100%" data-a="no">Cancel</button>
+                    <div style="font-size:11px;color:#888;margin-top:10px;line-height:1.45">
+                        Tabs open in the background — keep this tab in front until it finishes.
+                        Batch size/delay is in ⚙️ settings. Opening ${entries.length} at once can be heavy on memory.</div>
+                </div>
+            </div>`;
+        ov.querySelector('[data-a="all"]').onclick = () => { ov.remove(); startOpenTabs(entries, 'all'); };
+        ov.querySelector('[data-a="batch"]').onclick = () => { ov.remove(); startOpenTabs(entries, 'batch'); };
+        ov.querySelector('[data-a="no"]').onclick = () => ov.remove();
+        document.body.appendChild(ov);
+    }
+
+    function startOpenTabs(entries, mode) {
+        openQueue = { urls: entries.map(e => e.url), idx: 0, timer: null, fails: 0, mode };
+        setOpenBar(true);
+        stepOpen();
+    }
+
+    function stepOpen() {
+        const q = openQueue;
+        if (!q) return;
+        const batchEnd = (q.mode === 'all') ? q.urls.length
+            : Math.min(q.idx + Math.max(1, settings.batchSize | 0), q.urls.length);
+        const openOne = () => {
+            const qq = openQueue;
+            if (!qq) return;
+            if (qq.idx >= qq.urls.length) { finishOpen(); return; }
+            if (qq.idx >= batchEnd) {
+                updateOpenBar('next batch in ' + settings.batchDelaySec + 's');
+                qq.timer = setTimeout(stepOpen, Math.max(0, settings.batchDelaySec) * 1000);
+                return;
+            }
+            if (!GM.openInTab(qq.urls[qq.idx], true)) qq.fails++;
+            qq.idx++;
+            updateOpenBar();
+            qq.timer = setTimeout(openOne, OPEN_STAGGER_MS);
+        };
+        openOne();
+    }
+
+    function finishOpen() {
+        const q = openQueue; openQueue = null;
+        setOpenBar(false);
+        if (!q) return;
+        toast('Opened ' + (q.idx - q.fails) + ' tab(s)' +
+            (q.fails ? ' — ' + q.fails + ' blocked (allow pop-ups for this site)' : ''));
+    }
+
+    function stopOpenTabs(byUser) {
+        const q = openQueue;
+        if (!q) return;
+        clearTimeout(q.timer); openQueue = null;
+        setOpenBar(false);
+        if (byUser) toast('Stopped after ' + q.idx + ' of ' + q.urls.length);
+    }
+
+    function setOpenBar(show) {
+        const b = document.getElementById('vts-openbar');
+        if (b) b.style.display = show ? 'flex' : 'none';
+        if (show) updateOpenBar();
+    }
+    function updateOpenBar(extra) {
+        const s = document.getElementById('vts-open-status');
+        if (s && openQueue) s.textContent = 'Opening ' + openQueue.idx + ' / ' + openQueue.urls.length + (extra ? ' · ' + extra : '');
+    }
+
     /* ------------------------- Settings UI ------------------------- */
     let sOverlay = null;
     function openSettings() {
@@ -367,6 +474,10 @@
                         <input type="number" min="1" max="1440" data-s="activeMinutes" value="${settings.activeMinutes}"></div>
                     <div class="vts-row"><label>Max saved entries<span class="h">Oldest non-pinned dropped past this</span></label>
                         <input type="number" min="50" max="5000" data-s="maxEntries" value="${settings.maxEntries}"></div>
+                    <div class="vts-row"><label>Bulk-open: batch size<span class="h">Tabs opened per batch</span></label>
+                        <input type="number" min="1" max="50" data-s="batchSize" value="${settings.batchSize}"></div>
+                    <div class="vts-row"><label>Bulk-open: batch delay (s)<span class="h">Pause between batches</span></label>
+                        <input type="number" min="0" max="60" data-s="batchDelaySec" value="${settings.batchDelaySec}"></div>
                     <div class="vts-row"><label>Show corner button (FAB)</label>
                         <input type="checkbox" data-s="showFab" ${settings.showFab ? 'checked' : ''}></div>
                     <div class="vts-row" style="flex-direction:column;align-items:stretch;border:none">

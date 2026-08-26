@@ -36,6 +36,9 @@ Consequences:
   - **Copy URLs** — newline-separated to the clipboard.
 - If nothing is checked, export/copy acts on **everything currently shown** (so
   you can filter, then export all). Check specific rows to export just those.
+- **🚀 Open tabs (bulk restore)** — reopens the selected (or all shown) entries
+  as background tabs, either **all at once** or **in batches** with a pause
+  between them; a progress bar with Cancel shows in the manager.
 - **Settings**: auto-log toggle, heartbeat toggle, "active" window (minutes),
   max entries, corner-button toggle, and a URL exclude list.
 
@@ -66,9 +69,26 @@ Like the media sniffer, Settings is reachable without relying on Via's menu:
 4. Import it: Via **Settings → Bookmarks → Import** (or open it in any browser's
    bookmark importer).
 
+## Reopening saved tabs (bulk restore)
+
+Select the tabs you want (or filter and select nothing to act on everything
+shown) and tap **🚀 Open tabs**:
+
+- **10 or fewer** open immediately, no questions asked.
+- More than that, you get a choice: **⚡ All at once** or **⏳ In batches**
+  (default 10 tabs every 3 s — both configurable in ⚙️ settings). Batches are
+  the sane option for a 100-tab restore: memory stays manageable and the browser
+  isn't slammed with a hundred simultaneous page loads.
+- Tabs open **in the background** via `GM_openInTab`, so the queue keeps running
+  from the current tab — keep it in front until it finishes. A progress bar with
+  **Cancel** sits above the manager's footer.
+- On managers without `GM_openInTab` the script falls back to `window.open`,
+  which popup blockers may limit — blocked tabs are counted and reported in the
+  final toast (allow pop-ups for the site and retry).
+
 ## Notes
 
-- "Open" (↗) on a row opens that URL in a new tab; opening many at once may be
-  blocked by the browser — export/import is the reliable way to restore a set.
+- "Open" (↗) on a row opens that single URL in a new tab; use **🚀 Open tabs**
+  for restoring many at once.
 - The `pagehide`/`visibilitychange` events used to timestamp tabs are best-effort
   on mobile; the list still captures the page on load regardless.

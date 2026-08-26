@@ -8,7 +8,7 @@ Personal userscripts for Android browsers with a built-in userscript manager
 | Script | Description | Docs |
 | ------ | ----------- | ---- |
 | [`media-sniffer.user.js`](media-sniffer.user.js) | Better media sniffer (Via + XBrowser): organized/detailed media list with size + extension filters, an on-video pop-up player, and download / open-in-external-player / copy-link actions. | [docs](docs/media-sniffer.md) |
-| [`via-tab-saver.user.js`](via-tab-saver.user.js) | Tab manager workaround for Via: auto-logs pages across all tabs into one shared list and exports them to a bookmarks.html file, JSON, or the clipboard. | [docs](docs/tab-saver.md) |
+| [`via-tab-saver.user.js`](via-tab-saver.user.js) | Tab manager workaround for Via: auto-logs pages across all tabs into one shared list, exports them to a bookmarks.html file, JSON, or the clipboard, and bulk-reopens a selection (all at once or in batches). | [docs](docs/tab-saver.md) |
 
 Open your browser's userscript manager and add the raw `*.user.js` file, or paste
 its contents. See each script's docs page for details.
