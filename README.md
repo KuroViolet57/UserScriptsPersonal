@@ -18,6 +18,7 @@ its contents. See each script's docs page for details.
 | Extension | Description | Docs |
 | --- | ----------- | ---- |
 | [`tab-manager/`](tab-manager/) | **Tab Vault** — tab, group and window manager. Live tab list, real tab groups, saved sessions, and automatic capture of closed windows/tabs so you can always reopen them. | [readme](tab-manager/README.md) |
+| [`media-sniffer-ext/`](media-sniffer-ext/) | **Media Vault** — the media sniffer as an extension: webRequest-level detection (any frame, any format, Content-Type based), size/format filters, segment folding, on-video button with in-page player, and real chrome.downloads downloads. | [readme](media-sniffer-ext/README.md) |
 
 Manifest V3. Load it unpacked (or as a zip) in any Chromium browser that allows
 local extensions.

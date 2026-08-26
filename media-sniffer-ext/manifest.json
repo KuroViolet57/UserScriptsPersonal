@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Media Vault",
+  "version": "1.0.0",
+  "description": "Media sniffer with full network coverage: detects video/audio/streams via webRequest (any frame, any format, headers included), lists them with size and filters, adds an on-video button, and downloads through the browser's download manager.",
+  "permissions": [
+    "webRequest",
+    "storage",
+    "unlimitedStorage",
+    "downloads",
+    "tabs"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Media Vault",
+    "default_popup": "media.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
