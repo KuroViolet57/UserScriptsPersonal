@@ -238,6 +238,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else if (msg.type === 'rebuild') {
                 await rebuildMirror();
                 sendResponse({ ok: true });
+            } else if (msg.type === 'openManager') {
+                // gesture from the content script: open the full-page manager,
+                // reusing an existing manager tab if one is already open
+                const url = chrome.runtime.getURL('manager.html');
+                const existing = await chrome.tabs.query({ url });
+                if (existing.length) await chrome.tabs.update(existing[0].id, { active: true });
+                else await chrome.tabs.create({ url });
+                sendResponse({ ok: true });
             } else {
                 sendResponse({ ok: false, error: 'unknown message' });
             }

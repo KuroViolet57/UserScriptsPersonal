@@ -10,7 +10,7 @@ const K = {
 };
 const DEFAULT_SETTINGS = {
     batchSize: 10, batchDelaySec: 3, captureClosed: true,
-    maxClosedWindows: 50, maxClosedTabs: 300
+    maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up'
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const HAS_GROUPS = !!(chrome.tabGroups && chrome.tabs.group);
@@ -544,6 +544,14 @@ async function renderSettings() {
     box.innerHTML = `
       <div class="field inline"><label>Capture closed windows &amp; tabs<span class="h">Turn off to stop recording anything</span></label>
         <input type="checkbox" id="s-capture" ${s.captureClosed ? 'checked' : ''}></div>
+      <div class="field inline"><label>Open gesture<span class="h">Multi-finger gesture on any page opens the manager. If your phone grabs a gesture (e.g. 3-finger-down screenshot), pick another.</span></label>
+        <select id="s-gesture">
+          <option value="off">Off</option>
+          <option value="tap3">3-finger tap</option>
+          <option value="tap4">4-finger tap</option>
+          <option value="swipe3up">3-finger swipe up</option>
+          <option value="swipe3down">3-finger swipe down</option>
+        </select></div>
       <div class="field inline"><label>Restore batch size<span class="h">Tabs opened per batch</span></label>
         <input type="number" id="s-batch" min="1" max="50" value="${s.batchSize}"></div>
       <div class="field inline"><label>Batch delay (seconds)<span class="h">Pause between batches (max 20)</span></label>
@@ -571,10 +579,12 @@ async function renderSettings() {
       </div>`;
 
     paintIcons(box);
+    $('#s-gesture').value = s.gesture || 'swipe3up';
 
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
             captureClosed: $('#s-capture').checked,
+            gesture: $('#s-gesture').value,
             batchSize: Math.max(1, Math.min(50, +$('#s-batch').value || 10)),
             batchDelaySec: Math.max(0, Math.min(20, +$('#s-delay').value || 3)),
             maxClosedWindows: Math.max(5, Math.min(300, +$('#s-mw').value || 50)),

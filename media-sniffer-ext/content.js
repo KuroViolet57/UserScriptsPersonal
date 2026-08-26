@@ -14,7 +14,7 @@
 
     let settings = {
         buttonOn: true, buttonSize: 44, buttonCorner: 'tr',
-        minVideoPx: 120, playerPackage: ''
+        minVideoPx: 120, playerPackage: '', gesture: 'tap3'
     };
 
     function send(msg) {
@@ -269,9 +269,62 @@
         overlay.remove(); overlay = null;
     }
 
+    /* --------------------------- open gesture ---------------------------
+     * Multi-finger shortcut straight to the media panel (default: 3-finger
+     * tap; configurable — 3-finger swipe DOWN is a system screenshot on many
+     * Android skins, so avoid that one if your phone grabs it). */
+    function armGesture() {
+        const need = () => {
+            const g = settings.gesture || 'off';
+            return g === 'tap4' ? 4 : (g === 'off' ? 0 : 3);
+        };
+        let tracking = false, fired = false, sx = 0, sy = 0, st = 0, moved = 0, seen = 0;
+        const centroid = ts => {
+            let x = 0, y = 0;
+            for (const t of ts) { x += t.clientX; y += t.clientY; }
+            return { x: x / ts.length, y: y / ts.length };
+        };
+        addEventListener('touchstart', e => {
+            const n = need(); if (!n) return;
+            seen = Math.max(seen, e.touches.length);
+            if (e.touches.length === n && !tracking) {
+                tracking = true; fired = false; moved = 0;
+                const c = centroid(e.touches); sx = c.x; sy = c.y; st = Date.now();
+            }
+        }, { passive: true });
+        addEventListener('touchmove', e => {
+            if (!tracking || fired) return;
+            const g = settings.gesture, n = need();
+            if (e.touches.length !== n) return;
+            const c = centroid(e.touches);
+            const dx = c.x - sx, dy = c.y - sy;
+            moved = Math.max(moved, Math.abs(dx), Math.abs(dy));
+            if (g === 'swipe3up' && dy < -90 && Math.abs(dx) < 130) { fired = true; tracking = false; openOverlay(null); }
+            else if (g === 'swipe3down' && dy > 90 && Math.abs(dx) < 130) { fired = true; tracking = false; openOverlay(null); }
+        }, { passive: true });
+        addEventListener('touchend', e => {
+            if (e.touches.length > 0) return;
+            const g = settings.gesture;
+            if (tracking && !fired && (g === 'tap3' || g === 'tap4') &&
+                seen === need() && Date.now() - st < 450 && moved < 40) {
+                openOverlay(null);
+            }
+            tracking = false; fired = false; seen = 0;
+        }, { passive: true });
+        addEventListener('touchcancel', () => { tracking = false; fired = false; seen = 0; }, { passive: true });
+    }
+
+    // settings changes (saved from the popup) apply live, no reload needed
+    try {
+        chrome.storage.onChanged.addListener(ch => {
+            if (ch.settings && ch.settings.newValue) Object.assign(settings, ch.settings.newValue);
+        });
+    } catch (e) {}
+
     /* ------------------------------- boot ------------------------------- */
     function boot() {
         scan();
+        armGesture();
         let raf = false;
         const onMove = () => { if (!raf) { raf = true; requestAnimationFrame(() => { raf = false; repositionAll(); }); } };
         addEventListener('scroll', onMove, true);

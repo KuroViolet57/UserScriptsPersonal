@@ -37,6 +37,13 @@ Referer/CORS tricks needed.
 - **Setup** (cyan): button options, external player package, segment folding,
   min-size ignore threshold, per-tab cap.
 
+## Quick access
+
+A multi-finger **open gesture** (default: **3-finger tap**, configurable in
+Setup) opens the on-page media panel directly — no toolbar trip. Pick a gesture
+your phone's system doesn't already use (3-finger swipe down is often
+screenshot).
+
 ## Install
 
 1. Copy the `media-sniffer-ext/` folder (or zip it).

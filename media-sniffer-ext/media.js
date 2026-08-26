@@ -284,6 +284,14 @@ async function renderSettings() {
         <input type="number" id="s-minpx" min="0" max="1000" value="${s.minVideoPx}"></div>
       <div class="field"><label>External player package<span class="h">Android package for "Player" (blank = system chooser). e.g. org.videolan.vlc, com.mxtech.videoplayer.ad</span></label>
         <input type="text" id="s-player" value="${s.playerPackage || ''}" placeholder="system chooser"></div>
+      <div class="field inline"><label>Open gesture<span class="h">Multi-finger gesture on any page opens the media panel. Avoid gestures your phone already grabs (3-finger-down is often screenshot).</span></label>
+        <select id="s-gesture">
+          <option value="off">Off</option>
+          <option value="tap3">3-finger tap</option>
+          <option value="tap4">4-finger tap</option>
+          <option value="swipe3up">3-finger swipe up</option>
+          <option value="swipe3down">3-finger swipe down</option>
+        </select></div>
       <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>
         <input type="checkbox" id="s-collapse" ${s.collapseSegments ? 'checked' : ''}></div>
       <div class="field inline"><label>Ignore media smaller than<span class="h">Bytes; 0 keeps everything</span></label>
@@ -295,9 +303,11 @@ async function renderSettings() {
       <div class="field"><button class="btn d" id="s-clear" data-ico="trash" style="width:100%">Clear all detected media</button></div>`;
     paintIcons(box);
     $('#s-corner').value = s.buttonCorner || 'tr';
+    $('#s-gesture').value = s.gesture || 'tap3';
     $('#s-save').onclick = async () => {
         await send({ type: 'setSettings', settings: {
             buttonOn: $('#s-btn').checked,
+            gesture: $('#s-gesture').value,
             buttonSize: Math.max(28, Math.min(80, +$('#s-size').value || 44)),
             buttonCorner: $('#s-corner').value,
             minVideoPx: Math.max(0, Math.min(1000, +$('#s-minpx').value || 120)),
@@ -306,7 +316,7 @@ async function renderSettings() {
             minSniffBytes: Math.max(0, +$('#s-minb').value || 0),
             maxPerTab: Math.max(50, Math.min(2000, +$('#s-max').value || 300))
         } });
-        toast('Settings saved — pages pick it up on reload');
+        toast('Settings saved');
     };
     $('#s-clear').onclick = async () => {
         if (!confirm('Clear all detected media?')) return;

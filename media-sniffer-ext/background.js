@@ -22,7 +22,8 @@ const DEFAULT_SETTINGS = {
     playerPackage: '',       // android package for "open in player" ('' = chooser)
     collapseSegments: true,  // fold repeated .ts/.m4s segment URLs into one entry
     maxPerTab: 300,
-    minSniffBytes: 0         // ignore network media smaller than this (0 = keep all)
+    minSniffBytes: 0,        // ignore network media smaller than this (0 = keep all)
+    gesture: 'tap3'          // off | tap3 | tap4 | swipe3up | swipe3down → opens the on-page panel
 };
 
 /* ------------------------------ storage ------------------------------ */

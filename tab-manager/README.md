@@ -56,6 +56,19 @@ Capture on/off, restore batch size + delay, how many closed windows/tabs to
 keep, a full JSON export, and a live report of whether the tab-groups API is
 available on your build.
 
+## Quick access (gesture & shortcuts)
+
+- **Open gesture** — a content script listens for a multi-finger gesture on any
+  page and opens the manager (reusing its tab if already open). Default:
+  **3-finger swipe up**; configurable in ⚙ Setup (off / 3- or 4-finger tap /
+  3-finger swipe up or down). If your phone's system grabs a gesture — 3-finger
+  swipe *down* is screenshot on many Android skins — pick another.
+- **Home screen**: open the manager full-page (⛶), then try the browser menu's
+  *Add to home screen* / bookmark on that `chrome-extension://…/manager.html`
+  URL. Browser support varies.
+- Extensions cannot add buttons to the browser's own toolbar/menus — the
+  gesture is the way around that wall.
+
 ## Install
 
 Because the browser has to allow local extensions:

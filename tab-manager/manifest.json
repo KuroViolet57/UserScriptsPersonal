@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Vault",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Tab, group and window manager: live tab list, tab groups, saved sessions, and automatic capture of closed windows/tabs so you can always reopen them.",
   "permissions": [
     "tabs",
@@ -10,11 +10,19 @@
     "unlimitedStorage",
     "bookmarks"
   ],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_title": "Tab Vault",
     "default_popup": "manager.html"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
 }
