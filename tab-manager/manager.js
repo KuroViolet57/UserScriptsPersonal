@@ -20,6 +20,81 @@ let groupsApiWorks = null;
 const $ = s => document.querySelector(s);
 const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
 
+/* ------------------------------- icons -------------------------------
+ * Stroke icons drawn at 24×24 and scaled; they inherit `currentColor`, so a
+ * button's colour carries into its glyph. */
+const ICON = {
+    vault:      '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="12" r="3.2"/><path d="M12 5.2v1.6M12 17.2v1.6M18.8 12h-1.6M6.8 12H5.2"/>',
+    layers:     '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+    folder:     '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    folderPlus: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 11v6M9 14h6"/>',
+    history:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    bookmark:   '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+    sliders:    '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+    search:     '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    checkAll:   '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+    square:     '<rect x="3" y="3" width="18" height="18" rx="2"/>',
+    check:      '<path d="M20 6 9 17l-5-5"/>',
+    x:          '<path d="M18 6 6 18M6 6l12 12"/>',
+    save:       '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+    star:       '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+    copy:       '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    window:     '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/>',
+    maximize:   '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+    refresh:    '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
+    restore:    '<path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>',
+    trash:      '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+    edit:       '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/>',
+    download:   '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>',
+    code:       '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
+    loader:     '<path d="M12 2v4M12 18v4M4.9 4.9l2.9 2.9M16.2 16.2l2.9 2.9M2 12h4M18 12h4M4.9 19.1l2.9-2.9M16.2 7.8l2.9-2.9"/>',
+    pin:        '<path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
+    alert:      '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    info:       '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+    inbox:      '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/>',
+    grid:       '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+    zap:        '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>'
+};
+function svg(name, size) {
+    const s = size || 16;
+    return `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ''}</svg>`;
+}
+/* Fill every [data-ico] placeholder in a subtree. */
+function paintIcons(root) {
+    (root || document).querySelectorAll('[data-ico]').forEach(n => {
+        const name = n.dataset.ico;
+        n.removeAttribute('data-ico');
+        const slot = n.querySelector('.ni');
+        if (slot) slot.innerHTML = svg(name, 18);                              // nav
+        else if (n.classList.contains('btn')) n.insertAdjacentHTML('afterbegin', svg(name, 14));
+        else n.innerHTML = svg(name, n.classList.contains('logo') ? 18 : 16);
+    });
+}
+
+/* Stable colour per domain, so each site keeps its own hue. */
+function domainHue(u) {
+    const h = host(u) || '';
+    let n = 0;
+    for (let i = 0; i < h.length; i++) n = (n * 31 + h.charCodeAt(i)) >>> 0;
+    return n % 360;
+}
+/* Favicon when there is one, otherwise a coloured letter tile. */
+function avatarFor(t) {
+    const a = el('div', 'av');
+    const hue = domainHue(t.url);
+    a.style.background = `linear-gradient(135deg,hsl(${hue} 62% 46%),hsl(${(hue + 28) % 360} 62% 36%))`;
+    const letter = (host(t.url) || '?').replace(/^[^a-z0-9]*/i, '').charAt(0) || '?';
+    a.textContent = letter;
+    if (t.favIconUrl && /^https?:/.test(t.favIconUrl)) {
+        const img = el('img');
+        img.src = t.favIconUrl;
+        img.onload = () => { a.textContent = ''; a.style.background = 'var(--bg3)'; a.appendChild(img); };
+        img.onerror = () => {};
+    }
+    return a;
+}
+
 function get(key, def) { return new Promise(r => chrome.storage.local.get({ [key]: def }, o => r(o[key]))); }
 function set(key, val) { return new Promise(r => chrome.storage.local.set({ [key]: val }, () => r())); }
 async function getSettings() { return Object.assign({}, DEFAULT_SETTINGS, await get(K.SETTINGS, {})); }
@@ -169,6 +244,7 @@ function groupOf(id) { return state.groups.find(g => g.id === id); }
 /* ------------------------------ render ------------------------------ */
 async function render() {
     const s = state.section;
+    document.body.dataset.sec = s;
     document.querySelectorAll('.sec').forEach(x => x.classList.add('hidden'));
     $('#sec-' + s).classList.remove('hidden');
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.sec === s));
@@ -200,11 +276,6 @@ function tabRow(t) {
         if (cb.checked) state.selected.add(t.id); else state.selected.delete(t.id);
         row.classList.toggle('sel', cb.checked); renderActions();
     };
-    const fav = el('img', 'fav');
-    if (t.favIconUrl && /^https?:/.test(t.favIconUrl)) fav.src = t.favIconUrl;
-    else fav.classList.add('blank');          // no icon: keep the space, drop the box
-    fav.onerror = () => fav.classList.add('blank');
-
     const body = el('div', 'body');
     const title = el('div', 't'); title.textContent = t.title || host(t.url);
     const url = el('div', 'u'); url.textContent = host(t.url);
@@ -214,18 +285,22 @@ function tabRow(t) {
     const g = groupOf(t.groupId);
     if (g) {
         const b = el('span', 'gbadge g-' + (g.color || 'grey'));
-        b.textContent = g.title || 'group'; meta.appendChild(b);
+        b.textContent = g.title || (g.synthesized ? 'group ' + g.id : 'group');
+        meta.appendChild(b);
     }
-    if (t.pinned) { const p = el('span'); p.textContent = '📌 pinned'; meta.appendChild(p); }
-    if (t.active) { const a = el('span'); a.textContent = '● active'; meta.appendChild(a); }
+    if (t.pinned) {
+        const p = el('span', 'pill'); p.innerHTML = svg('pin', 10) + ' pinned';
+        p.style.cssText = 'display:inline-flex;align-items:center;gap:3px'; meta.appendChild(p);
+    }
+    if (t.active) { const a = el('span', 'live'); a.textContent = '● active'; meta.appendChild(a); }
     if (meta.children.length) body.appendChild(meta);
 
     body.onclick = () => chrome.tabs.update(t.id, { active: true }).then(() => chrome.windows.update(t.windowId, { focused: true }).catch(() => {}));
 
-    const x = el('button', 'rb'); x.textContent = '✕'; x.title = 'Close tab';
+    const x = el('button', 'rb'); x.innerHTML = svg('x', 16); x.title = 'Close tab';
     x.onclick = async e => { e.stopPropagation(); await chrome.tabs.remove(t.id); state.selected.delete(t.id); render(); };
 
-    row.appendChild(cb); row.appendChild(fav); row.appendChild(body); row.appendChild(x);
+    row.appendChild(cb); row.appendChild(avatarFor(t)); row.appendChild(body); row.appendChild(x);
     return row;
 }
 
@@ -240,8 +315,9 @@ function renderOpen() {
         shown += tabs.length;
         const g = el('div', 'wingroup');
         const head = el('div', 'winhead');
-        head.innerHTML = `<span class="wt"></span>${w.current ? '<span class="cur">current</span>' : ''}`;
-        const label = state.windows.length > 1 ? `🪟 Window ${wn}` : '🪟 Window';
+        head.innerHTML = `<span class="wi">${svg('window', 15)}</span><span class="wt"></span>` +
+            (w.current ? '<span class="cur">current</span>' : '');
+        const label = state.windows.length > 1 ? `Window ${wn}` : 'Window';
         head.querySelector('.wt').textContent = `${label} · ${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`;
 
         const selBtn = el('button', 'link'); selBtn.textContent = 'select all';
@@ -257,23 +333,22 @@ function renderOpen() {
         tabs.forEach(t => g.appendChild(tabRow(t)));
         box.appendChild(g);
     }
-    if (!shown) box.innerHTML = `<div class="empty">${state.query ? 'No tabs match “' + state.query + '”.' : 'No open tabs found.'}</div>`;
+    if (!shown) box.appendChild(emptyState(state.query ? 'search' : 'layers',
+        state.query ? 'No tabs match <b>' + esc(state.query) + '</b>.' : 'No open tabs found.'));
 }
 
 async function renderGroups() {
     const box = $('#sec-groups'); box.innerHTML = '';
 
     const live = state.groups || [];
-    const h = el('div', 'cm'); h.textContent = 'LIVE GROUPS';
-    h.style.cssText = 'font-weight:700;letter-spacing:.5px;margin:2px 0 8px';
-    box.appendChild(h);
+    box.appendChild(sechead('grid', 'Browser groups'));
 
     if (state.groupSource === 'tabs') {
-        const n = el('div', 'card');
+        const n = el('div', 'card note');
         n.innerHTML = '<div class="cm">ℹ️ Your browser groups tabs in its own UI without reporting the groups to extensions, so these were <b>reconstructed from the tabs themselves</b>. Names and colours aren\'t available — everything else works.</div>';
         box.appendChild(n);
     } else if (!live.length) {
-        const n = el('div', 'card');
+        const n = el('div', 'card note');
         const why = state.groupError ? ' (<code>' + esc(state.groupError) + '</code>)' : '';
         n.innerHTML = !state.groupsUsable
             ? '<div class="cm">⚠️ <b>Your browser can\'t share tab groups with extensions</b>' + why +
@@ -289,8 +364,8 @@ async function renderGroups() {
         const ch = el('div', 'ch');
         const badge = el('span', 'gbadge g-' + (g.color || 'grey'));
         badge.textContent = g.title || (g.synthesized ? 'Group #' + g.id : 'untitled');
-        const ct = el('span', 'ct'); ct.textContent = `${tabs.length} tab${tabs.length === 1 ? '' : 's'}`;
-        ch.appendChild(badge); ch.appendChild(ct); c.appendChild(ch);
+        const ct = el('span', 'cnt'); ct.textContent = `${tabs.length} tab${tabs.length === 1 ? '' : 's'}`;
+        ch.appendChild(badge); ch.appendChild(el('span', 'ct')); ch.appendChild(ct); c.appendChild(ch);
 
         const cu = el('div', 'cu');
         cu.textContent = tabs.slice(0, 4).map(t => t.title || host(t.url)).join(' · ');
@@ -304,56 +379,67 @@ async function renderGroups() {
                 try { await chrome.tabGroups.update(g.id, { title: r.text, color: r.color }); }
                 catch (e) { toast('Rename failed: ' + (e.message || e)); }
                 render();
-            }));
+            }, '', 'edit'));
         }
-        cb.appendChild(mk('Save', () => saveGroup(g, tabs), 'p'));
-        cb.appendChild(mk('Select', () => { tabs.forEach(t => state.selected.add(t.id)); state.section = 'open'; render(); }));
+        cb.appendChild(mk('Save', () => saveGroup(g, tabs), 'p', 'save'));
+        cb.appendChild(mk('Select', () => { tabs.forEach(t => state.selected.add(t.id)); state.section = 'open'; render(); }, '', 'edit'));
         cb.appendChild(mk('Ungroup', async () => {
             try { await chrome.tabs.ungroup(tabs.map(t => t.id)); }
             catch (e) { toast('Ungroup failed: ' + (e.message || e)); }
             render();
-        }));
+        }, '', 'folder'));
         cb.appendChild(mk('Close', async () => {
             if (!await confirmBox(`Close ${tabs.length} tab(s) in this group?`)) return;
             await chrome.tabs.remove(tabs.map(t => t.id)); render();
-        }, 'd'));
+        }, 'd', 'x'));
         c.appendChild(cb);
         box.appendChild(c);
     }
 
     const saved = await get(K.SAVED_GROUPS, []);
-    const h2 = el('div', 'cm'); h2.textContent = 'SAVED GROUPS';
-    h2.style.cssText = 'font-weight:700;letter-spacing:.5px;margin:16px 0 8px';
-    box.appendChild(h2);
+    box.appendChild(sechead('bookmark', 'Saved groups', true));
     if (!saved.length) {
-        const e = el('div', 'empty'); e.textContent = 'No saved groups yet.';
-        box.appendChild(e);
+        box.appendChild(emptyState('folderPlus',
+            'No saved groups yet.<br>Select tabs in <b>Open</b> and tap <b>Group</b>.'));
     }
     saved.forEach(sg => {
         const c = el('div', 'card');
         const ch = el('div', 'ch');
         const badge = el('span', 'gbadge g-' + (sg.color || 'grey'));
         badge.textContent = sg.name || 'group';
-        const ct = el('span', 'ct'); ct.textContent = `${sg.tabs.length} tab${sg.tabs.length === 1 ? '' : 's'}`;
-        ch.appendChild(badge); ch.appendChild(ct); c.appendChild(ch);
+        const ct = el('span', 'cnt'); ct.textContent = `${sg.tabs.length} tab${sg.tabs.length === 1 ? '' : 's'}`;
+        ch.appendChild(badge); ch.appendChild(el('span', 'ct')); ch.appendChild(ct); c.appendChild(ch);
         const cm = el('div', 'cm'); cm.textContent = 'saved ' + relTime(sg.savedAt); c.appendChild(cm);
         const cu = el('div', 'cu'); cu.textContent = sg.tabs.slice(0, 4).map(t => t.title || host(t.url)).join(' · ');
         c.appendChild(cu);
         const cb = el('div', 'cb');
-        cb.appendChild(mk('Restore', () => restoreGroup(sg), 'p'));
-        cb.appendChild(mk('New window', () => openUrls(sg.tabs.map(t => t.url), 'window')));
+        cb.appendChild(mk('Restore', () => restoreGroup(sg), 'v', 'restore'));
+        cb.appendChild(mk('New window', () => openUrls(sg.tabs.map(t => t.url), 'window'), '', 'window'));
         cb.appendChild(mk('Delete', async () => {
             const list = (await get(K.SAVED_GROUPS, [])).filter(x => x.id !== sg.id);
             await set(K.SAVED_GROUPS, list); render();
-        }, 'd'));
+        }, 'd', 'trash'));
         c.appendChild(cb);
         box.appendChild(c);
     });
 }
 
-function mk(label, fn, cls) {
+function mk(label, fn, cls, icon) {
     const b = el('button', 'btn sm' + (cls ? ' ' + cls : ''));
-    b.textContent = label; b.onclick = fn; return b;
+    b.innerHTML = (icon ? svg(icon, 13) : '') + '<span></span>';
+    b.querySelector('span').textContent = label;
+    b.onclick = fn; return b;
+}
+function sechead(icon, text, alt) {
+    const d = el('div', 'sechead' + (alt ? ' alt' : ''));
+    d.innerHTML = svg(icon, 14) + '<span class="st"></span><span class="rule"></span>';
+    d.querySelector('.st').textContent = text;
+    return d;
+}
+function emptyState(icon, html) {
+    const d = el('div', 'empty');
+    d.innerHTML = `<div class="eico">${svg(icon, 26)}</div>` + html;
+    return d;
 }
 
 async function renderClosed() {
@@ -361,60 +447,52 @@ async function renderClosed() {
     const wins = (await get(K.CLOSED_WINDOWS, [])).filter(w => !state.query || w.tabs.some(matches));
     const tabs = (await get(K.CLOSED_TABS, [])).filter(matches);
 
-    const h = el('div', 'cm'); h.textContent = 'CLOSED WINDOWS';
-    h.style.cssText = 'font-weight:700;letter-spacing:.5px;margin:2px 0 8px';
-    box.appendChild(h);
+    box.appendChild(sechead('window', 'Closed windows'));
     if (!wins.length) {
-        const e = el('div', 'empty');
-        e.innerHTML = 'No closed windows captured yet.<br>Close a window and it appears here, ready to reopen.';
-        box.appendChild(e);
+        box.appendChild(emptyState('inbox',
+            'No closed windows captured yet.<br>Close a window and it lands here, ready to reopen.'));
     }
     wins.forEach(w => {
         const c = el('div', 'card');
         const ch = el('div', 'ch');
-        const ct = el('span', 'ct'); ct.textContent = `🪟 ${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`;
+        ch.innerHTML = `<span class="ci">${svg('window', 15)}</span>`;
+        const ct = el('span', 'ct'); ct.textContent = `${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`;
         ch.appendChild(ct); c.appendChild(ch);
         const cm = el('div', 'cm'); cm.textContent = 'closed ' + relTime(w.closedAt); c.appendChild(cm);
         const cu = el('div', 'cu'); cu.textContent = w.tabs.slice(0, 5).map(t => t.title || host(t.url)).join(' · ');
         c.appendChild(cu);
         const cb = el('div', 'cb');
-        cb.appendChild(mk('↩ Reopen window', () => reopenWindow(w), 'p'));
-        cb.appendChild(mk('Here', () => openUrls(w.tabs.map(t => t.url), 'batch')));
-        cb.appendChild(mk('Save', () => saveSession(w.tabs, 'Closed window')));
+        cb.appendChild(mk('Reopen window', () => reopenWindow(w), 'a', 'restore'));
+        cb.appendChild(mk('Here', () => openUrls(w.tabs.map(t => t.url), 'batch'), '', 'download'));
+        cb.appendChild(mk('Save', () => saveSession(w.tabs, 'Closed window'), '', 'save'));
         cb.appendChild(mk('Forget', async () => {
             await set(K.CLOSED_WINDOWS, (await get(K.CLOSED_WINDOWS, [])).filter(x => x.id !== w.id)); render();
-        }, 'd'));
+        }, 'd', 'trash'));
         c.appendChild(cb);
         box.appendChild(c);
     });
 
-    const h2 = el('div', 'cm'); h2.textContent = 'CLOSED TABS';
-    h2.style.cssText = 'font-weight:700;letter-spacing:.5px;margin:16px 0 8px';
-    box.appendChild(h2);
-    if (!tabs.length) { const e = el('div', 'empty'); e.textContent = 'No closed tabs captured yet.'; box.appendChild(e); }
+    box.appendChild(sechead('history', 'Closed tabs', true));
+    if (!tabs.length) box.appendChild(emptyState('history', 'No closed tabs captured yet.'));
     if (tabs.length) {
         const bar = el('div', 'cb'); bar.style.marginBottom = '8px';
-        bar.appendChild(mk('Reopen all shown', () => openUrls(tabs.map(t => t.url), 'batch'), 'p'));
+        bar.appendChild(mk('Reopen all shown', () => openUrls(tabs.map(t => t.url), 'batch'), 'a', 'restore'));
         bar.appendChild(mk('Clear list', async () => {
             if (!await confirmBox('Clear the closed-tabs list?')) return;
             await set(K.CLOSED_TABS, []); render();
-        }, 'd'));
+        }, 'd', 'trash'));
         box.appendChild(bar);
     }
     tabs.slice(0, 200).forEach(t => {
         const row = el('div', 'row');
-        const fav = el('img', 'fav');
-        if (t.favIconUrl && /^https?:/.test(t.favIconUrl)) fav.src = t.favIconUrl;
-        else fav.classList.add('blank');
-        fav.onerror = () => fav.classList.add('blank');
         const body = el('div', 'body');
         const ti = el('div', 't'); ti.textContent = t.title || host(t.url);
         const u = el('div', 'u'); u.textContent = host(t.url) + ' · ' + relTime(t.closedAt);
         body.appendChild(ti); body.appendChild(u);
         body.onclick = () => chrome.tabs.create({ url: t.url });
-        const x = el('button', 'rb'); x.textContent = '↩'; x.title = 'Reopen';
+        const x = el('button', 'rb go'); x.innerHTML = svg('restore', 16); x.title = 'Reopen';
         x.onclick = () => chrome.tabs.create({ url: t.url });
-        row.appendChild(fav); row.appendChild(body); row.appendChild(x);
+        row.appendChild(avatarFor(t)); row.appendChild(body); row.appendChild(x);
         box.appendChild(row);
     });
 }
@@ -423,30 +501,33 @@ async function renderSaved() {
     const box = $('#sec-saved'); box.innerHTML = '';
     const sessions = (await get(K.SESSIONS, [])).filter(s => !state.query || (s.name || '').toLowerCase().includes(state.query.toLowerCase()) || s.tabs.some(matches));
     if (!sessions.length) {
-        box.innerHTML = '<div class="empty">No saved sessions yet.<br>Select tabs in “Open” and tap 💾 Save session.</div>';
+        box.appendChild(emptyState('bookmark',
+            'No saved sessions yet.<br>Select tabs in <b>Open</b> and tap <b>Save session</b>.'));
         return;
     }
     sessions.forEach(s => {
         const c = el('div', 'card');
         const ch = el('div', 'ch');
-        const ct = el('span', 'ct'); ct.textContent = s.name; ch.appendChild(ct);
-        c.appendChild(ch);
+        ch.innerHTML = `<span class="ci">${svg('bookmark', 15)}</span>`;
+        const ct = el('span', 'ct'); ct.textContent = s.name;
+        const cn = el('span', 'cnt'); cn.textContent = s.tabs.length;
+        ch.appendChild(ct); ch.appendChild(cn); c.appendChild(ch);
         const cm = el('div', 'cm'); cm.textContent = `${s.tabs.length} tabs · saved ${relTime(s.savedAt)}`; c.appendChild(cm);
         const cu = el('div', 'cu'); cu.textContent = s.tabs.slice(0, 5).map(t => t.title || host(t.url)).join(' · ');
         c.appendChild(cu);
         const cb = el('div', 'cb');
-        cb.appendChild(mk('↩ Restore', () => openUrls(s.tabs.map(t => t.url), 'batch'), 'p'));
-        cb.appendChild(mk('New window', () => openUrls(s.tabs.map(t => t.url), 'window')));
-        cb.appendChild(mk('⭐ Bookmark', () => bookmarkUrls(s.tabs, s.name)));
-        cb.appendChild(mk('HTML', () => exportBookmarksHtml(s.tabs, s.name)));
-        cb.appendChild(mk('Copy', () => copyUrls(s.tabs)));
+        cb.appendChild(mk('Restore', () => openUrls(s.tabs.map(t => t.url), 'batch'), 'g', 'restore'));
+        cb.appendChild(mk('New window', () => openUrls(s.tabs.map(t => t.url), 'window'), '', 'window'));
+        cb.appendChild(mk('Bookmark', () => bookmarkUrls(s.tabs, s.name), '', 'star'));
+        cb.appendChild(mk('HTML', () => exportBookmarksHtml(s.tabs, s.name), '', 'code'));
+        cb.appendChild(mk('Copy', () => copyUrls(s.tabs), '', 'copy'));
         cb.appendChild(mk('Rename', async () => {
             const r = await askText('Rename session', s.name);
             if (!r || !r.text) return;
             const list = await get(K.SESSIONS, []);
             const item = list.find(x => x.id === s.id); if (item) item.name = r.text;
             await set(K.SESSIONS, list); render();
-        }));
+        }, '', 'edit'));
         cb.appendChild(mk('Delete', async () => {
             if (!await confirmBox(`Delete session “${s.name}”?`)) return;
             await set(K.SESSIONS, (await get(K.SESSIONS, [])).filter(x => x.id !== s.id)); render();
@@ -471,11 +552,11 @@ async function renderSettings() {
         <input type="number" id="s-mw" min="5" max="300" value="${s.maxClosedWindows}"></div>
       <div class="field inline"><label>Keep closed tabs<span class="h">Currently stored: ${ct.length}</span></label>
         <input type="number" id="s-mt" min="10" max="2000" value="${s.maxClosedTabs}"></div>
-      <div class="field"><button class="btn p" id="s-save" style="width:100%">Save settings</button></div>
+      <div class="field"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <div class="field"><button class="btn" id="s-export" style="width:100%">⬇ Export all data (JSON)</button>
+      <div class="field"><button class="btn" id="s-export" data-ico="download" style="width:100%">Export all data (JSON)</button>
         <div class="h">Sessions, saved groups and closed history.</div></div>
-      <div class="field"><button class="btn d" id="s-clearclosed" style="width:100%">🗑 Clear closed history</button></div>
+      <div class="field"><button class="btn d" id="s-clearclosed" data-ico="trash" style="width:100%">Clear closed history</button></div>
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <div class="field">
         <label>Diagnostics</label>
@@ -483,13 +564,13 @@ async function renderSettings() {
             : groupsApiWorks === false ? 'NOT usable on this browser' + (state.groupError ? ' — ' + esc(state.groupError) : '')
             : HAS_GROUPS ? 'present, not yet probed (open the Groups tab)' : 'NOT available on this build'}</b></div>
         <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn" id="s-diag" style="flex:1">🔍 Run diagnostics</button>
-          <button class="btn" id="s-diagcopy" style="flex:0 0 auto">📋</button>
+          <button class="btn" id="s-diag" data-ico="search" style="flex:1">Run diagnostics</button>
+          <button class="btn" id="s-diagcopy" data-ico="copy" style="flex:0 0 auto"></button>
         </div>
-        <pre id="s-diagout" style="display:none;background:var(--bg);border:1px solid var(--line);
-          border-radius:9px;padding:10px;margin-top:8px;font-size:10.5px;line-height:1.5;
-          white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto"></pre>
+        <pre id="s-diagout" class="diag" style="display:none"></pre>
       </div>`;
+
+    paintIcons(box);
 
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
@@ -851,5 +932,6 @@ $('#jobcancel').onclick = async () => {
     clearInterval(jobTimer); $('#jobbar').classList.add('hidden'); toast('Restore cancelled');
 };
 
+paintIcons();
 get(K.OPEN_JOB, null).then(j => { if (j) watchJob(); });
 render();

@@ -6,27 +6,30 @@
 <title>Tab Vault</title>
 <link rel="stylesheet" href="manager.css">
 </head>
-<body>
+<body data-sec="open">
 
 <header>
-    <span class="logo">🗄️</span>
+    <span class="logo" data-ico="vault"></span>
     <h1>Tab Vault</h1>
-    <button class="icon" id="expand" title="Open in a full tab">⛶</button>
-    <button class="icon" id="refresh" title="Refresh">⟳</button>
+    <button class="icon" id="expand" data-ico="maximize" title="Open in a full tab"></button>
+    <button class="icon" id="refresh" data-ico="refresh" title="Refresh"></button>
 </header>
 
 <nav id="nav">
-    <button class="on" data-sec="open">Open <em id="c-open"></em></button>
-    <button data-sec="groups">Groups <em id="c-groups"></em></button>
-    <button data-sec="closed">Closed <em id="c-closed"></em></button>
-    <button data-sec="saved">Saved <em id="c-saved"></em></button>
-    <button data-sec="settings">⚙</button>
+    <button class="on" data-sec="open"    data-ico="layers"><span class="ni"></span><span class="nl">Open <em id="c-open"></em></span></button>
+    <button data-sec="groups"   data-ico="folder"><span class="ni"></span><span class="nl">Groups <em id="c-groups"></em></span></button>
+    <button data-sec="closed"   data-ico="history"><span class="ni"></span><span class="nl">Closed <em id="c-closed"></em></span></button>
+    <button data-sec="saved"    data-ico="bookmark"><span class="ni"></span><span class="nl">Saved <em id="c-saved"></em></span></button>
+    <button data-sec="settings" data-ico="sliders"><span class="ni"></span><span class="nl">Setup</span></button>
 </nav>
 
 <div id="searchbar">
-    <input id="search" type="search" placeholder="Search title or URL…">
-    <button class="icon" id="selall" title="Select all shown">☑</button>
-    <button class="icon" id="selnone" title="Clear selection">☐</button>
+    <div class="searchwrap">
+        <span data-ico="search"></span>
+        <input id="search" type="search" placeholder="Search title or URL…">
+    </div>
+    <button class="icon" id="selall" data-ico="checkAll" title="Select all shown"></button>
+    <button class="icon" id="selnone" data-ico="square" title="Clear selection"></button>
 </div>
 
 <main id="main">
@@ -38,19 +41,20 @@
 </main>
 
 <div id="jobbar" class="hidden">
+    <span class="spin" data-ico="loader"></span>
     <span id="jobtext"></span>
     <button class="link" id="jobcancel">Cancel</button>
 </div>
 
 <footer id="actions" class="hidden">
-    <div class="selinfo"><b id="selcount">0</b> selected</div>
+    <div class="selinfo"><span data-ico="check"></span><b id="selcount">0</b> selected</div>
     <div class="btns">
-        <button class="btn p" data-act="session">💾 Save session</button>
-        <button class="btn" data-act="group">🗂 Group</button>
-        <button class="btn" data-act="window">🪟 To new window</button>
-        <button class="btn" data-act="bookmark">⭐ Bookmark</button>
-        <button class="btn" data-act="copy">📋 Copy</button>
-        <button class="btn d" data-act="close">✕ Close tabs</button>
+        <button class="btn p" data-act="session" data-ico="save">Save session</button>
+        <button class="btn v" data-act="group" data-ico="folderPlus">Group</button>
+        <button class="btn" data-act="window" data-ico="window">New window</button>
+        <button class="btn g" data-act="bookmark" data-ico="star">Bookmark</button>
+        <button class="btn" data-act="copy" data-ico="copy">Copy</button>
+        <button class="btn d" data-act="close" data-ico="x">Close</button>
     </div>
 </footer>
 
