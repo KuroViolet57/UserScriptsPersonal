@@ -106,3 +106,8 @@ That ordering is covered by tests in the repo's scratch harness.
 - `chrome.windows` behaves differently across Android browsers — some treat
   every window as a tab. If "move to new window" misbehaves, that's the browser,
   and reopening "here" (into the current window) always works.
+- Some Android builds return **the same global tab list for every window** from
+  `windows.getAll({populate:true})`, which showed up as several identical
+  windows. The tab list is therefore built from `tabs.query({})` grouped by each
+  tab's own `windowId`, which can't duplicate; diagnostics reports whether your
+  build has this quirk (`populate duplicates`).

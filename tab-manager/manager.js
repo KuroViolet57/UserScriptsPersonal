@@ -82,20 +82,37 @@ function askText(title, initial, extra) {
 }
 
 /* --------------------------- data loading --------------------------- */
-async function loadLive() {
-    const wins = await chrome.windows.getAll({ populate: true });
-    const cur = await chrome.windows.getCurrent().catch(() => null);
+const SELF_URL = (() => { try { return chrome.runtime.getURL(''); } catch (e) { return ''; } })();
 
-    state.windows = wins.map(w => ({
-        id: w.id,
-        focused: !!w.focused,
-        current: cur && w.id === cur.id,
-        tabs: (w.tabs || []).map(t => ({
+async function loadLive() {
+    // Build windows from tabs.query, NOT windows.getAll({populate:true}): some
+    // Android builds hand every window the same global tab list, which shows up
+    // as N identical windows. A tab reports exactly one windowId, so grouping by
+    // that can't duplicate.
+    const allTabs = await chrome.tabs.query({});
+    const cur = await chrome.windows.getCurrent().catch(() => null);
+    let winMeta = [];
+    try { winMeta = await chrome.windows.getAll({}); } catch (e) {}
+
+    const byWin = new Map();
+    const seenTabs = new Set();
+    for (const t of allTabs) {
+        if (t.id == null || seenTabs.has(t.id)) continue;
+        seenTabs.add(t.id);
+        if (SELF_URL && (t.url || '').startsWith(SELF_URL)) continue;   // hide our own page
+        const wid = (t.windowId == null ? -1 : t.windowId);
+        if (!byWin.has(wid)) byWin.set(wid, []);
+        byWin.get(wid).push({
             id: t.id, url: t.url || t.pendingUrl || '', title: t.title || '',
             favIconUrl: t.favIconUrl || '', pinned: !!t.pinned,
-            groupId: (t.groupId == null ? -1 : t.groupId), windowId: t.windowId, active: !!t.active
-        }))
-    }));
+            groupId: (t.groupId == null ? -1 : t.groupId), windowId: wid, active: !!t.active
+        });
+    }
+
+    state.windows = Array.from(byWin.entries()).map(([id, tabs]) => {
+        const meta = winMeta.find(w => w.id === id) || {};
+        return { id, tabs, focused: !!meta.focused, type: meta.type || '', current: !!(cur && id === cur.id) };
+    });
 
     state.groups = [];
     state.groupSource = 'none';
@@ -166,7 +183,8 @@ function tabRow(t) {
     };
     const fav = el('img', 'fav');
     if (t.favIconUrl && /^https?:/.test(t.favIconUrl)) fav.src = t.favIconUrl;
-    fav.onerror = () => { fav.style.visibility = 'hidden'; };
+    else fav.classList.add('blank');          // no icon: keep the space, drop the box
+    fav.onerror = () => fav.classList.add('blank');
 
     const body = el('div', 'body');
     const title = el('div', 't'); title.textContent = t.title || host(t.url);
@@ -195,14 +213,17 @@ function tabRow(t) {
 function renderOpen() {
     const box = $('#sec-open'); box.innerHTML = '';
     let shown = 0;
+    let wn = 0;
     for (const w of state.windows) {
+        wn++;
         const tabs = w.tabs.filter(matches);
         if (!tabs.length) continue;
         shown += tabs.length;
         const g = el('div', 'wingroup');
         const head = el('div', 'winhead');
         head.innerHTML = `<span class="wt"></span>${w.current ? '<span class="cur">current</span>' : ''}`;
-        head.querySelector('.wt').textContent = `🪟 Window · ${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`;
+        const label = state.windows.length > 1 ? `🪟 Window ${wn}` : '🪟 Window';
+        head.querySelector('.wt').textContent = `${label} · ${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`;
 
         const selBtn = el('button', 'link'); selBtn.textContent = 'select all';
         selBtn.onclick = () => { tabs.forEach(t => state.selected.add(t.id)); renderOpen(); renderActions(); };
@@ -362,7 +383,8 @@ async function renderClosed() {
         const row = el('div', 'row');
         const fav = el('img', 'fav');
         if (t.favIconUrl && /^https?:/.test(t.favIconUrl)) fav.src = t.favIconUrl;
-        fav.onerror = () => { fav.style.visibility = 'hidden'; };
+        else fav.classList.add('blank');
+        fav.onerror = () => fav.classList.add('blank');
         const body = el('div', 'body');
         const ti = el('div', 't'); ti.textContent = t.title || host(t.url);
         const u = el('div', 'u'); u.textContent = host(t.url) + ' · ' + relTime(t.closedAt);
@@ -532,6 +554,17 @@ async function runDiagnostics() {
             }));
         }
         add('windows reported', JSON.stringify(wins.map(w => ({ id: w.id, type: w.type }))));
+        add('distinct windowIds', JSON.stringify(Array.from(new Set(tabs.map(t => t.windowId)))));
+
+        // Does windows.getAll({populate:true}) hand every window the same list?
+        try {
+            const pop = await chrome.windows.getAll({ populate: true });
+            const sig = pop.map(w => (w.tabs || []).map(t => t.id).sort().join(','));
+            add('populate tab counts', JSON.stringify(pop.map(w => (w.tabs || []).length)));
+            add('populate duplicates', (sig.length > 1 && new Set(sig).size === 1)
+                ? 'YES — every window returned identical tabs (browser bug, worked around)'
+                : 'no');
+        } catch (e) { add('populate check ERROR', String((e && e.message) || e)); }
     } catch (e) {
         add('tabs.query ERROR', String((e && e.message) || e));
     }

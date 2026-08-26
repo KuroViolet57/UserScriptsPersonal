@@ -50,6 +50,7 @@ nav em{font-style:normal;font-size:10.5px;color:var(--muted);background:var(--bg
 .row.sel{background:#1b2436}
 .row input[type=checkbox]{width:17px;height:17px;margin-top:2px;flex:0 0 auto;accent-color:var(--accent)}
 .row .fav{width:16px;height:16px;border-radius:3px;margin-top:1px;flex:0 0 auto;background:var(--bg3)}
+.row .fav.blank{background:none;visibility:hidden}
 .row .body{min-width:0;flex:1}
 .row .t{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .u{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
