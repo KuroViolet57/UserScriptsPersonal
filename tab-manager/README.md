@@ -82,6 +82,29 @@ Because the browser has to allow local extensions:
 Tap **⛶** in the header to open the manager as a full tab — recommended on a
 phone, and more reliable for very large restores.
 
+## Updating without losing your data
+
+An extension's identity is its **ID**, and `chrome.storage` data lives under
+that ID. A zip install normally gets its ID from the unpack folder — so each
+new zip looked like a brand-new extension with empty storage.
+
+Since v1.5.1 the manifest carries a **`key`** that pins the ID permanently:
+
+> Tab Vault ID: `nmoplfoffnphabhdfmidmlohapijgadb`
+
+so installing a newer zip should now **update in place**, keeping sessions and
+history (verify on the extensions screen: both versions must never appear side
+by side — if you still end up with two, remove the *old* one).
+
+Belt and braces for any migration: **⚙ Setup → Export all data (JSON)** before
+updating, and **Import data (JSON)** afterwards. Import is additive — existing
+entries win, duplicates are skipped — so importing an old backup into a live
+install is always safe.
+
+> One-time step: this first keyed version still has a different ID than your
+> current install, so carry data over once via Export → install v1.5.1+ →
+> Import → remove the old copy. Every update after that lands in place.
+
 > No icon files are included, so the browser shows its default extension icon.
 > Drop `icon-48.png` / `icon-128.png` into the folder and add an `"icons"` block
 > to `manifest.json` if you want a custom one.

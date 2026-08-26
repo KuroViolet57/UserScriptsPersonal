@@ -564,6 +564,9 @@ async function renderSettings() {
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <div class="field"><button class="btn" id="s-export" data-ico="download" style="width:100%">Export all data (JSON)</button>
         <div class="h">Sessions, saved groups and closed history.</div></div>
+      <div class="field"><button class="btn" id="s-import" data-ico="restore" style="width:100%">Import data (JSON)</button>
+        <input type="file" id="s-importfile" accept=".json,application/json" style="display:none">
+        <div class="h">Merges a previous export into this install — nothing is overwritten, duplicates are skipped. Use this to carry data across reinstalls.</div></div>
       <div class="field"><button class="btn d" id="s-clearclosed" data-ico="trash" style="width:100%">Clear closed history</button></div>
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <div class="field">
@@ -592,6 +595,21 @@ async function renderSettings() {
         });
         toast('Settings saved');
     };
+    $('#s-import').onclick = () => $('#s-importfile').click();
+    $('#s-importfile').addEventListener('change', async e => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        try {
+            const data = JSON.parse(await f.text());
+            const merged = await importData(data);
+            toast(`Imported: ${merged.sessions} sessions, ${merged.savedGroups} groups, ` +
+                  `${merged.closedWindows} windows, ${merged.closedTabs} tabs`);
+            render();
+        } catch (err) {
+            toast('Import failed: ' + ((err && err.message) || 'not a valid export file'));
+        }
+        e.target.value = '';
+    });
     $('#s-export').onclick = async () => {
         const data = {
             exportedAt: new Date().toISOString(),
@@ -618,6 +636,36 @@ async function renderSettings() {
         out.style.display = 'block'; out.textContent = text;
         navigator.clipboard.writeText(text).then(() => toast('Diagnostics copied'), () => toast('Copy failed'));
     };
+}
+
+/* Merge a previous "Export all data" JSON into the current install.
+ * Additive only: existing entries win, incoming duplicates (by id, falling
+ * back to content identity) are skipped. Returns per-list added counts. */
+async function importData(data) {
+    if (!data || typeof data !== 'object') throw new Error('not an export file');
+    const lists = [
+        ['sessions', K.SESSIONS, s => s.id || ('s|' + s.name + '|' + (s.tabs || []).length)],
+        ['savedGroups', K.SAVED_GROUPS, g => g.id || ('g|' + g.name + '|' + (g.tabs || []).length)],
+        ['closedWindows', K.CLOSED_WINDOWS, w => w.id || ('w|' + w.closedAt)],
+        ['closedTabs', K.CLOSED_TABS, t => t.id || ('t|' + t.url + '|' + t.closedAt)]
+    ];
+    if (!lists.some(([name]) => Array.isArray(data[name]))) throw new Error('no Tab Vault data found');
+    const added = {};
+    for (const [name, key, idOf] of lists) {
+        const incoming = Array.isArray(data[name]) ? data[name] : [];
+        const current = await get(key, []);
+        const seen = new Set(current.map(idOf));
+        let n = 0;
+        for (const item of incoming) {
+            if (!item || typeof item !== 'object' || seen.has(idOf(item))) continue;
+            seen.add(idOf(item));
+            current.push(item);
+            n++;
+        }
+        if (n) await set(key, current);
+        added[name] = n;
+    }
+    return added;
 }
 
 /* Report exactly what this browser exposes, so group problems can be pinned

@@ -51,6 +51,14 @@ screenshot).
    from file.
 3. Play a video, then open the popup — or tap the button on the video itself.
 
+## Updating
+
+The manifest pins the extension ID via a `key`
+(`cnengdbbojabibofckbdilpdjjdbiajb`), so from v1.1.1 on, installing a newer zip
+updates in place instead of creating a second copy. If you update from a
+pre-key version, remove the old copy afterwards — Media Vault's data is
+per-tab detections plus settings, so there is nothing precious to migrate.
+
 ## Notes & limits
 
 - Streams (`m3u8`/`mpd`): "Download" fetches the playlist file itself; feed it
