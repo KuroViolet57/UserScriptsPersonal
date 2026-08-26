@@ -292,10 +292,15 @@ async function renderSettings() {
           <option value="swipe3up">3-finger swipe up</option>
           <option value="swipe3down">3-finger swipe down</option>
         </select></div>
+      <div class="field inline"><label>Gesture opens<span class="h">What the gesture shows</span></label>
+        <select id="s-gtarget">
+          <option value="panel">Media panel (on page)</option>
+          <option value="tab">Full-page manager (tab)</option>
+        </select></div>
       <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>
         <input type="checkbox" id="s-collapse" ${s.collapseSegments ? 'checked' : ''}></div>
-      <div class="field inline"><label>Ignore media smaller than<span class="h">Bytes; 0 keeps everything</span></label>
-        <input type="number" id="s-minb" min="0" step="1024" value="${s.minSniffBytes || 0}"></div>
+      <div class="field inline"><label>Ignore media smaller than (MB)<span class="h">Hides smaller files everywhere (streams/blob exempt); 0 keeps everything</span></label>
+        <input type="number" id="s-minb" min="0" step="0.5" value="${((s.minSniffBytes || 0) / 1048576).toFixed(1).replace(/\.0$/, '')}"></div>
       <div class="field inline"><label>Max entries per tab</label>
         <input type="number" id="s-max" min="50" max="2000" value="${s.maxPerTab}"></div>
       <div class="field"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
@@ -304,16 +309,18 @@ async function renderSettings() {
     paintIcons(box);
     $('#s-corner').value = s.buttonCorner || 'tr';
     $('#s-gesture').value = s.gesture || 'tap3';
+    $('#s-gtarget').value = s.gestureTarget || 'panel';
     $('#s-save').onclick = async () => {
         await send({ type: 'setSettings', settings: {
             buttonOn: $('#s-btn').checked,
             gesture: $('#s-gesture').value,
+            gestureTarget: $('#s-gtarget').value,
             buttonSize: Math.max(28, Math.min(80, +$('#s-size').value || 44)),
             buttonCorner: $('#s-corner').value,
             minVideoPx: Math.max(0, Math.min(1000, +$('#s-minpx').value || 120)),
             playerPackage: $('#s-player').value.trim(),
             collapseSegments: $('#s-collapse').checked,
-            minSniffBytes: Math.max(0, +$('#s-minb').value || 0),
+            minSniffBytes: Math.round(Math.max(0, +$('#s-minb').value || 0) * 1048576),
             maxPerTab: Math.max(50, Math.min(2000, +$('#s-max').value || 300))
         } });
         toast('Settings saved');

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Vault",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Tab, group and window manager: live tab list, tab groups, saved sessions, and automatic capture of closed windows/tabs so you can always reopen them.",
   "permissions": [
     "tabs",
@@ -31,5 +31,15 @@
       "run_at": "document_idle"
     }
   ],
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1qU5pW6M3hp0fAY0bu2jl86ce2cb3vutc+e0EScD0wk8jn1qK9p6d75jn8bM1E3rPA+NRIzBq1+OGSndycm5afvxBK+ENEpHvFNqX2xRAXftSZpHq4wggaaU7G8jS9P/0YBu5nX2I/Dz/vt0nWGOLcV9QVmyP9m159Mt5j0NSzjrS78DsdaN9X9eWQM7auwxpTztUy6TF2tiNSKpXPP6GJvyVKYpZjSKykpqoRRngo0rFMbtEdXTowrC1InQjCpquGis1XUXrwob9g5waGWovI5jsjRrDmyhGxCuHCWTx03mjQUxgcNGszXdDvAtLmL2cXvfb226pjpgjFWnucD1HwIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1qU5pW6M3hp0fAY0bu2jl86ce2cb3vutc+e0EScD0wk8jn1qK9p6d75jn8bM1E3rPA+NRIzBq1+OGSndycm5afvxBK+ENEpHvFNqX2xRAXftSZpHq4wggaaU7G8jS9P/0YBu5nX2I/Dz/vt0nWGOLcV9QVmyP9m159Mt5j0NSzjrS78DsdaN9X9eWQM7auwxpTztUy6TF2tiNSKpXPP6GJvyVKYpZjSKykpqoRRngo0rFMbtEdXTowrC1InQjCpquGis1XUXrwob9g5waGWovI5jsjRrDmyhGxCuHCWTx03mjQUxgcNGszXdDvAtLmL2cXvfb226pjpgjFWnucD1HwIDAQAB",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "manager.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

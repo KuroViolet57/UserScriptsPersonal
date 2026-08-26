@@ -10,7 +10,7 @@ const K = {
 };
 const DEFAULT_SETTINGS = {
     batchSize: 10, batchDelaySec: 3, captureClosed: true,
-    maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up'
+    maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up', gestureTarget: 'sheet'
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const HAS_GROUPS = !!(chrome.tabGroups && chrome.tabs.group);
@@ -552,6 +552,11 @@ async function renderSettings() {
           <option value="swipe3up">3-finger swipe up</option>
           <option value="swipe3down">3-finger swipe down</option>
         </select></div>
+      <div class="field inline"><label>Gesture opens<span class="h">Sheet slides over the current page (swipe its handle down to dismiss); Tab opens the full-page manager.</span></label>
+        <select id="s-gtarget">
+          <option value="sheet">Bottom sheet (on page)</option>
+          <option value="tab">Full-page tab</option>
+        </select></div>
       <div class="field inline"><label>Restore batch size<span class="h">Tabs opened per batch</span></label>
         <input type="number" id="s-batch" min="1" max="50" value="${s.batchSize}"></div>
       <div class="field inline"><label>Batch delay (seconds)<span class="h">Pause between batches (max 20)</span></label>
@@ -583,11 +588,13 @@ async function renderSettings() {
 
     paintIcons(box);
     $('#s-gesture').value = s.gesture || 'swipe3up';
+    $('#s-gtarget').value = s.gestureTarget || 'sheet';
 
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
             captureClosed: $('#s-capture').checked,
             gesture: $('#s-gesture').value,
+            gestureTarget: $('#s-gtarget').value,
             batchSize: Math.max(1, Math.min(50, +$('#s-batch').value || 10)),
             batchDelaySec: Math.max(0, Math.min(20, +$('#s-delay').value || 3)),
             maxClosedWindows: Math.max(5, Math.min(300, +$('#s-mw').value || 50)),

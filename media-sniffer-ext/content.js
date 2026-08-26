@@ -14,7 +14,7 @@
 
     let settings = {
         buttonOn: true, buttonSize: 44, buttonCorner: 'tr',
-        minVideoPx: 120, playerPackage: '', gesture: 'tap3'
+        minVideoPx: 120, playerPackage: '', gesture: 'tap3', gestureTarget: 'panel'
     };
 
     function send(msg) {
@@ -273,6 +273,11 @@
      * Multi-finger shortcut straight to the media panel (default: 3-finger
      * tap; configurable — 3-finger swipe DOWN is a system screenshot on many
      * Android skins, so avoid that one if your phone grabs it). */
+    function fireGesture() {
+        if (settings.gestureTarget === 'tab') send({ type: 'openManagerTab' });
+        else openOverlay(null);
+    }
+
     function armGesture() {
         const need = () => {
             const g = settings.gesture || 'off';
@@ -299,15 +304,15 @@
             const c = centroid(e.touches);
             const dx = c.x - sx, dy = c.y - sy;
             moved = Math.max(moved, Math.abs(dx), Math.abs(dy));
-            if (g === 'swipe3up' && dy < -90 && Math.abs(dx) < 130) { fired = true; tracking = false; openOverlay(null); }
-            else if (g === 'swipe3down' && dy > 90 && Math.abs(dx) < 130) { fired = true; tracking = false; openOverlay(null); }
+            if (g === 'swipe3up' && dy < -90 && Math.abs(dx) < 130) { fired = true; tracking = false; fireGesture(); }
+            else if (g === 'swipe3down' && dy > 90 && Math.abs(dx) < 130) { fired = true; tracking = false; fireGesture(); }
         }, { passive: true });
         addEventListener('touchend', e => {
             if (e.touches.length > 0) return;
             const g = settings.gesture;
             if (tracking && !fired && (g === 'tap3' || g === 'tap4') &&
                 seen === need() && Date.now() - st < 450 && moved < 40) {
-                openOverlay(null);
+                fireGesture();
             }
             tracking = false; fired = false; seen = 0;
         }, { passive: true });

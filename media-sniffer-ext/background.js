@@ -23,7 +23,8 @@ const DEFAULT_SETTINGS = {
     collapseSegments: true,  // fold repeated .ts/.m4s segment URLs into one entry
     maxPerTab: 300,
     minSniffBytes: 0,        // ignore network media smaller than this (0 = keep all)
-    gesture: 'tap3'          // off | tap3 | tap4 | swipe3up | swipe3down → opens the on-page panel
+    gesture: 'tap3',         // off | tap3 | tap4 | swipe3up | swipe3down
+    gestureTarget: 'panel'   // panel (on-page) | tab (full-page manager)
 };
 
 /* ------------------------------ storage ------------------------------ */
@@ -143,20 +144,50 @@ async function addItem(tabId, item) {
         if (item.size) { item.segBytes = item.size; }
     }
 
-    if (s.minSniffBytes && item.size && item.size < s.minSniffBytes && item.src === 'net' &&
-        !STREAM_EXT.includes(item.ext)) { return; }
-
     bucket.items.push(item);
     if (bucket.items.length > s.maxPerTab) bucket.items.splice(0, bucket.items.length - s.maxPerTab);
     scheduleSave();
     updateBadge(tabId);
+
+    // DOM-reported items often arrive without a size (the element was cached),
+    // which used to let them bypass the min-size floor. Resolve it with a HEAD
+    // probe — host_permissions make this CORS-free from the worker.
+    if (!item.size && !item.blob && item.src === 'dom' && item.kind !== 'stream') probeSize(item);
+}
+
+async function probeSize(item) {
+    try {
+        const r = await fetch(item.url, { method: 'HEAD' });
+        if (!r.ok) return;
+        let size = parseInt(r.headers.get('content-length'), 10) || null;
+        const cr = r.headers.get('content-range');
+        const m = cr && /\/(\d+)\s*$/.exec(cr);
+        if (m) size = parseInt(m[1], 10);
+        if (size) { item.size = size; scheduleSave(); }
+    } catch (e) {}
+}
+
+/* The hard floor from Setup ("ignore media smaller than"), enforced when the
+ * lists are read so it applies to every item — network-sniffed, DOM-reported,
+ * and items whose size only arrived later via dedupe or probe. Streams and
+ * blob: sources have no knowable size and are exempt; unknown sizes are kept. */
+function passesMinSize(item, s) {
+    if (!s.minSniffBytes) return true;
+    if (item.kind === 'stream' || item.blob) return true;
+    const size = item.size || item.segBytes || null;
+    return size == null || size >= s.minSniffBytes;
+}
+async function visibleItems(bucket) {
+    if (!bucket) return [];
+    const s = await getSettings();
+    return bucket.items.filter(i => passesMinSize(i, s));
 }
 
 async function updateBadge(tabId) {
     if (!chrome.action || !chrome.action.setBadgeText) return;
     try {
         const bucket = (media || {})[tabId];
-        const n = bucket ? bucket.items.length : 0;
+        const n = bucket ? (await visibleItems(bucket)).length : 0;
         await chrome.action.setBadgeText({ tabId, text: n ? String(n) : '' });
         if (chrome.action.setBadgeBackgroundColor)
             await chrome.action.setBadgeBackgroundColor({ tabId, color: '#7c5cff' });
@@ -220,19 +251,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             await loadMedia();
             if (msg.type === 'getMediaForMe') {
                 const tid = sender.tab && sender.tab.id;
-                const b = (tid != null) ? media[tid] : null;
-                sendResponse({ ok: true, items: b ? b.items : [] });
+                sendResponse({ ok: true, items: await visibleItems(tid != null ? media[tid] : null) });
             } else if (msg.type === 'getMedia') {
                 if (msg.tabId != null) {
-                    const b = media[msg.tabId];
-                    sendResponse({ ok: true, items: b ? b.items : [] });
+                    sendResponse({ ok: true, items: await visibleItems(media[msg.tabId]) });
                 } else {
                     const all = [];
                     for (const tid in media) {
-                        for (const it of media[tid].items) all.push(Object.assign({ tabId: +tid }, it));
+                        for (const it of await visibleItems(media[tid])) all.push(Object.assign({ tabId: +tid }, it));
                     }
                     sendResponse({ ok: true, items: all });
                 }
+            } else if (msg.type === 'openManagerTab') {
+                const url = chrome.runtime.getURL('media.html');
+                const existing = await chrome.tabs.query({ url });
+                if (existing.length) await chrome.tabs.update(existing[0].id, { active: true });
+                else await chrome.tabs.create({ url });
+                sendResponse({ ok: true });
             } else if (msg.type === 'domMedia') {
                 const tabId = sender.tab && sender.tab.id;
                 if (tabId == null) { sendResponse({ ok: false }); return; }

@@ -40,9 +40,15 @@ Referer/CORS tricks needed.
 ## Quick access
 
 A multi-finger **open gesture** (default: **3-finger tap**, configurable in
-Setup) opens the on-page media panel directly — no toolbar trip. Pick a gesture
+Setup) opens the media UI directly — no toolbar trip. **"Gesture opens"**
+chooses between the on-page panel and the full-page manager tab. Pick a gesture
 your phone's system doesn't already use (3-finger swipe down is often
 screenshot).
+
+The Setup **"Ignore media smaller than (MB)"** floor now applies everywhere —
+list, panel and badge — including items whose size is only learned later
+(missing sizes are resolved with a HEAD probe). Streams and `blob:` sources are
+exempt since their size can't be known.
 
 ## Install
 
