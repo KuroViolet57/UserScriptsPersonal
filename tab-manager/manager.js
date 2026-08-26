@@ -14,6 +14,8 @@ const DEFAULT_SETTINGS = {
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const HAS_GROUPS = !!(chrome.tabGroups && chrome.tabs.group);
+// null = not probed yet, true/false once a real call has been attempted.
+let groupsApiWorks = null;
 
 const $ = s => document.querySelector(s);
 const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
@@ -118,30 +120,47 @@ async function loadLive() {
     state.groupSource = 'none';
     state.groupError = '';
 
-    if (HAS_GROUPS) {
+    // The tabGroups object can exist while every call throws ("Not implemented
+    // on Android"), so availability means "a call actually succeeded", not
+    // "the function is defined". Probed once and cached.
+    if (HAS_GROUPS && groupsApiWorks !== false) {
         try {
             const g = await chrome.tabGroups.query({});
+            groupsApiWorks = true;
             if (g && g.length) { state.groups = g; state.groupSource = 'api'; }
         } catch (e) {
+            groupsApiWorks = false;
             state.groupError = String((e && e.message) || e);
         }
     }
+    state.groupsUsable = (groupsApiWorks === true);
 
-    // Fallback: some builds (notably Android) group tabs in their own native UI
-    // without surfacing them through tabGroups.query(), yet the tabs still carry
-    // a groupId. Reconstruct groups from that so they're at least manageable.
+    // Fallback: some builds group tabs in their own UI without reporting them,
+    // yet the tabs still carry a usable groupId. Reconstruct groups from that.
+    //
+    // Two guards against sentinel values masquerading as a group: real group ids
+    // are positive (Chrome uses -1 for "none", some Android builds use 0), and a
+    // "group" that contains every single tab is a sentinel, not a group.
     if (!state.groups.length) {
-        const seen = new Map();
+        const counts = new Map();
+        let total = 0;
         for (const w of state.windows) {
             for (const t of w.tabs) {
-                if (t.groupId != null && t.groupId !== -1 && !seen.has(t.groupId)) {
-                    seen.set(t.groupId, {
-                        id: t.groupId, windowId: w.id, title: '', color: 'grey', synthesized: true
-                    });
+                total++;
+                if (typeof t.groupId === 'number' && t.groupId > 0) {
+                    counts.set(t.groupId, (counts.get(t.groupId) || 0) + 1);
                 }
             }
         }
-        if (seen.size) { state.groups = Array.from(seen.values()); state.groupSource = 'tabs'; }
+        const real = Array.from(counts.entries())
+            .filter(([, n]) => !(counts.size === 1 && n === total));
+        if (real.length) {
+            state.groups = real.map(([id]) => {
+                const owner = state.windows.find(w => w.tabs.some(t => t.groupId === id));
+                return { id, windowId: owner ? owner.id : -1, title: '', color: 'grey', synthesized: true };
+            });
+            state.groupSource = 'tabs';
+        }
     }
 }
 
@@ -255,9 +274,12 @@ async function renderGroups() {
         box.appendChild(n);
     } else if (!live.length) {
         const n = el('div', 'card');
-        n.innerHTML = HAS_GROUPS
-            ? '<div class="cm">⚠️ No groups reported by the browser, and no tabs carry a group id. If you can see a group in the browser\'s own tab switcher, it isn\'t exposed to extensions on this build — run <b>Diagnostics</b> in ⚙ settings and send me the result.</div>'
-            : '<div class="cm">⚠️ This build doesn\'t expose the tab-groups API at all. Saved groups below still work — they restore as a set of tabs.</div>';
+        const why = state.groupError ? ' (<code>' + esc(state.groupError) + '</code>)' : '';
+        n.innerHTML = !state.groupsUsable
+            ? '<div class="cm">⚠️ <b>Your browser can\'t share tab groups with extensions</b>' + why +
+              '. The groups you make in the browser stay invisible here, and nothing an extension does can change that.' +
+              '<br><br>Use <b>saved groups</b> below instead — Tab Vault\'s own groups. They work on every browser, survive a restart, and can be reopened as a set.</div>'
+            : '<div class="cm">No tab groups yet. Select tabs in “Open” and tap 🗂 Group.</div>';
         box.appendChild(n);
     }
 
@@ -457,7 +479,9 @@ async function renderSettings() {
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
       <div class="field">
         <label>Diagnostics</label>
-        <div class="h">Tab groups API: <b>${HAS_GROUPS ? 'available' : 'NOT available on this build'}</b></div>
+        <div class="h">Tab groups: <b>${groupsApiWorks === true ? 'working'
+            : groupsApiWorks === false ? 'NOT usable on this browser' + (state.groupError ? ' — ' + esc(state.groupError) : '')
+            : HAS_GROUPS ? 'present, not yet probed (open the Groups tab)' : 'NOT available on this build'}</b></div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn" id="s-diag" style="flex:1">🔍 Run diagnostics</button>
           <button class="btn" id="s-diagcopy" style="flex:0 0 auto">📋</button>
@@ -520,7 +544,8 @@ async function runDiagnostics() {
     add('chrome.tabs.ungroup', typeof (chrome.tabs && chrome.tabs.ungroup));
     add('chrome.windows.create', typeof (chrome.windows && chrome.windows.create));
     add('chrome.bookmarks', typeof chrome.bookmarks);
-    add('HAS_GROUPS (detected)', String(HAS_GROUPS));
+    add('HAS_GROUPS (objects)', String(HAS_GROUPS));
+    add('groups actually usable', String(groupsApiWorks));
 
     let q = 'not called';
     if (chrome.tabGroups && chrome.tabGroups.query) {
@@ -601,6 +626,18 @@ async function saveSession(tabs, prefix) {
     state.selected.clear(); render();
 }
 
+async function createSavedGroup(tabs, name, color) {
+    const usable = tabs.filter(t => isRestorable(t.url));
+    if (!usable.length) { toast('Nothing restorable to save'); return; }
+    const list = await get(K.SAVED_GROUPS, []);
+    list.unshift({
+        id: 'g' + Date.now().toString(36), name: name || 'Group', color: color || 'blue',
+        savedAt: Date.now(), tabs: usable.map(t => ({ url: t.url, title: t.title }))
+    });
+    await set(K.SAVED_GROUPS, list);
+    toast(`Saved group “${name || 'Group'}” · ${usable.length} tabs`);
+}
+
 async function saveGroup(g, tabs) {
     const usable = tabs.filter(t => isRestorable(t.url));
     if (!usable.length) { toast('Nothing restorable in this group'); return; }
@@ -619,7 +656,7 @@ async function restoreGroup(sg) {
     for (const t of sg.tabs) {
         try { created.push(await chrome.tabs.create({ url: t.url, active: false })); } catch (e) {}
     }
-    if (HAS_GROUPS && created.length) {
+    if (state.groupsUsable && created.length) {
         try {
             const gid = await chrome.tabs.group({ tabIds: created.map(t => t.id) });
             await chrome.tabGroups.update(gid, { title: sg.name, color: sg.color || 'blue' });
@@ -640,7 +677,7 @@ async function reopenWindow(w) {
         for (let i = 30; i < urls.length; i++) {
             try { made.push(await chrome.tabs.create({ url: urls[i], windowId: win.id, active: false })); } catch (e) {}
         }
-        if (HAS_GROUPS) {
+        if (state.groupsUsable) {
             const byGroup = {};
             w.tabs.forEach((t, i) => {
                 if (!t.group || !t.group.title) return;
@@ -769,21 +806,22 @@ document.querySelectorAll('#actions [data-act]').forEach(b => {
             return render();
         }
         if (act === 'group') {
-            if (!HAS_GROUPS) { toast('Tab groups unavailable — saving as a saved group');
-                const list = await get(K.SAVED_GROUPS, []);
-                const r0 = await askText('Saved group name', 'Group', { colors: true });
-                if (!r0) return;
-                list.unshift({ id: 'g' + Date.now().toString(36), name: r0.text || 'Group', color: r0.color || 'blue',
-                    savedAt: Date.now(), tabs: tabs.filter(t => isRestorable(t.url)).map(t => ({ url: t.url, title: t.title })) });
-                await set(K.SAVED_GROUPS, list); state.selected.clear(); return render();
-            }
-            const r = await askText('New group name', '', { colors: true });
+            const usable = state.groupsUsable;
+            const r = await askText(usable ? 'New group name' : 'Saved group name', '', { colors: true });
             if (!r) return;
-            try {
-                const gid = await chrome.tabs.group({ tabIds: tabs.map(t => t.id) });
-                await chrome.tabGroups.update(gid, { title: r.text || '', color: r.color || 'blue' });
-                state.selected.clear(); toast('Grouped ' + tabs.length + ' tabs');
-            } catch (e) { toast('Grouping failed: ' + (e.message || e)); }
+            if (usable) {
+                try {
+                    const gid = await chrome.tabs.group({ tabIds: tabs.map(t => t.id) });
+                    await chrome.tabGroups.update(gid, { title: r.text || '', color: r.color || 'blue' });
+                    state.selected.clear(); toast('Grouped ' + tabs.length + ' tabs');
+                    return render();
+                } catch (e) {
+                    groupsApiWorks = false;   // it lied about being available
+                    toast('Browser refused to group — saving as a saved group');
+                }
+            }
+            await createSavedGroup(tabs, r.text || 'Group', r.color || 'blue');
+            state.selected.clear();
             return render();
         }
     };
