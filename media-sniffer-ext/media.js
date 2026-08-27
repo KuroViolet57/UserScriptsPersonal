@@ -294,6 +294,7 @@ async function renderSettings() {
         </select></div>
       <div class="field inline"><label>Gesture opens<span class="h">What the gesture shows</span></label>
         <select id="s-gtarget">
+          <option value="sheet">Bottom sheet (on page)</option>
           <option value="panel">Media panel (on page)</option>
           <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page manager (tab)</option>
@@ -310,7 +311,7 @@ async function renderSettings() {
     paintIcons(box);
     $('#s-corner').value = s.buttonCorner || 'tr';
     $('#s-gesture').value = s.gesture || 'tap3';
-    $('#s-gtarget').value = s.gestureTarget || 'panel';
+    $('#s-gtarget').value = s.gestureTarget || 'sheet';
     $('#s-save').onclick = async () => {
         await send({ type: 'setSettings', settings: {
             buttonOn: $('#s-btn').checked,

@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
     maxPerTab: 300,
     minSniffBytes: 0,        // ignore network media smaller than this (0 = keep all)
     gesture: 'tap3',         // off | tap3 | tap4 | swipe3up | swipe3down
-    gestureTarget: 'panel'   // panel (on-page) | popup (native sheet) | tab
+    gestureTarget: 'sheet'   // sheet | panel (on-page) | popup (native) | tab
 };
 
 /* ------------------------------ storage ------------------------------ */

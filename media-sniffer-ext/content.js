@@ -14,7 +14,7 @@
 
     let settings = {
         buttonOn: true, buttonSize: 44, buttonCorner: 'tr',
-        minVideoPx: 120, playerPackage: '', gesture: 'tap3', gestureTarget: 'panel'
+        minVideoPx: 120, playerPackage: '', gesture: 'tap3', gestureTarget: 'sheet'
     };
 
     function send(msg) {
@@ -273,8 +273,93 @@
      * Multi-finger shortcut straight to the media panel (default: 3-finger
      * tap; configurable — 3-finger swipe DOWN is a system screenshot on many
      * Android skins, so avoid that one if your phone grabs it). */
+    /* ---------------------------- bottom sheet ----------------------------
+     * The full Media Vault UI (media.html) in an extension iframe presented as
+     * a slide-up sheet — same pattern as Tab Vault. Extension frames are
+     * exempt from page CSP; media.html is in web_accessible_resources. */
+    let sheetWrap = null;
+
+    function ensureSheetStyle() {
+        if (document.getElementById('mv-sheet-style')) return;
+        const st = document.createElement('style');
+        st.id = 'mv-sheet-style';
+        st.textContent = `
+        #mv-sheet-wrap{position:fixed;inset:0;z-index:2147483640;background:rgba(0,0,0,.45);
+            opacity:0;transition:opacity .22s}
+        #mv-sheet-wrap.show{opacity:1}
+        #mv-sheet{position:fixed;left:0;right:0;bottom:0;height:84vh;z-index:2147483641;
+            background:#15151b;border-radius:18px 18px 0 0;overflow:hidden;
+            box-shadow:0 -8px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;
+            transform:translateY(105%);transition:transform .26s cubic-bezier(.2,.8,.3,1);
+            touch-action:none}
+        #mv-sheet.show{transform:translateY(0)}
+        #mv-sheet .mv-grab{flex:0 0 auto;height:40px;display:flex;align-items:center;
+            background:#181823;cursor:grab;position:relative;touch-action:none}
+        #mv-sheet .mv-grab .mv-pill{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+            width:52px;height:5.5px;border-radius:3px;background:#4a4a5e}
+        #mv-sheet .mv-grab .mv-sclose{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+            width:32px;height:32px;border:none;border-radius:9px;background:#22222f;color:#9a9ab0;
+            font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center}
+        #mv-sheet iframe{flex:1;border:none;width:100%;background:#0f0f17}`;
+        (document.head || document.documentElement).appendChild(st);
+    }
+
+    function openSheet() {
+        if (sheetWrap) return;
+        ensureSheetStyle();
+        sheetWrap = document.createElement('div');
+        sheetWrap.id = 'mv-sheet-wrap';
+        const sheet = document.createElement('div');
+        sheet.id = 'mv-sheet';
+        const grab = document.createElement('div');
+        grab.className = 'mv-grab';
+        grab.innerHTML = '<span class="mv-pill"></span><button class="mv-sclose">\u2715</button>';
+        grab.querySelector('.mv-sclose').addEventListener('click', closeSheet);
+        const frame = document.createElement('iframe');
+        frame.src = chrome.runtime.getURL('media.html');
+        sheet.appendChild(grab);
+        sheet.appendChild(frame);
+        document.body.appendChild(sheetWrap);
+        document.body.appendChild(sheet);
+        requestAnimationFrame(() => { sheetWrap && sheetWrap.classList.add('show'); sheet.classList.add('show'); });
+        sheetWrap.addEventListener('click', closeSheet);
+
+        let sy = 0, dy = 0, dragging = false, lastY = 0, lastT = 0, vel = 0;
+        grab.addEventListener('touchstart', e => {
+            dragging = true; sy = lastY = e.touches[0].clientY; dy = 0; vel = 0; lastT = Date.now();
+            sheet.style.transition = 'none';
+        }, { passive: true });
+        grab.addEventListener('touchmove', e => {
+            if (!dragging) return;
+            const y = e.touches[0].clientY, t = Date.now();
+            if (t > lastT) vel = (y - lastY) / (t - lastT);
+            lastY = y; lastT = t;
+            dy = Math.max(0, y - sy);
+            sheet.style.transform = `translateY(${dy}px)`;
+        }, { passive: true });
+        const endDrag = () => {
+            if (!dragging) return;
+            dragging = false;
+            sheet.style.transition = '';
+            if (dy > 80 || (dy > 24 && vel > 0.45)) closeSheet();
+            else sheet.style.transform = '';
+        };
+        grab.addEventListener('touchend', endDrag, { passive: true });
+        grab.addEventListener('touchcancel', endDrag, { passive: true });
+    }
+
+    function closeSheet() {
+        if (!sheetWrap) return;
+        const wrap = sheetWrap; sheetWrap = null;
+        const sheet = document.getElementById('mv-sheet');
+        wrap.classList.remove('show');
+        if (sheet) { sheet.style.transform = ''; sheet.classList.remove('show'); }
+        setTimeout(() => { wrap.remove(); sheet && sheet.remove(); }, 280);
+    }
+
     function fireGesture() {
         if (settings.gestureTarget === 'tab') send({ type: 'openManagerTab' });
+        else if (settings.gestureTarget === 'panel') openOverlay(null);
         else if (settings.gestureTarget === 'popup') {
             // Fall back to the on-page panel only if the native sheet truly
             // didn't open — judged by focus, since some builds open it while
@@ -286,11 +371,11 @@
                 setTimeout(() => {
                     removeEventListener('blur', onBlur);
                     const opened = (r && r.ok) || lostFocus || !document.hasFocus();
-                    if (!opened) openOverlay(null);
+                    if (!opened) openSheet();
                 }, 400);
             });
         }
-        else openOverlay(null);
+        else openSheet();   // 'sheet' (default)
     }
 
     function armGesture() {
@@ -305,7 +390,7 @@
             return { x: x / ts.length, y: y / ts.length };
         };
         addEventListener('touchstart', e => {
-            const n = need(); if (!n) return;
+            const n = need(); if (!n || sheetWrap) return;
             seen = Math.max(seen, e.touches.length);
             if (e.touches.length === n && !tracking) {
                 tracking = true; fired = false; moved = 0;

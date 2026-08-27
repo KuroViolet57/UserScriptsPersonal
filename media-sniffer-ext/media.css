@@ -15,7 +15,7 @@ body{
     background:var(--bg);color:var(--txt);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     font-size:14px;display:flex;flex-direction:column;
-    min-width:320px;width:100%;height:100%;min-height:540px;overflow:hidden;
+    min-width:300px;width:100%;height:100vh;height:100dvh;min-height:340px;overflow:hidden;
 }
 button{font-family:inherit;cursor:pointer}
 svg{display:block;flex:0 0 auto}
@@ -138,3 +138,14 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
     max-width:88%;text-align:center;opacity:0;pointer-events:none;
     transition:opacity .2s,transform .2s;z-index:50}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Small popup viewports (mobile toolbar popups give odd sizes/scales) */
+@media (max-width:380px){
+    header{padding:10px 11px}
+    .sec{padding:8px 8px 14px}
+    nav button{min-width:0;font-size:10px}
+}
+@media (max-height:480px){
+    header{padding:8px 11px}
+    #searchbar,#filters{padding-top:6px;padding-bottom:6px}
+}

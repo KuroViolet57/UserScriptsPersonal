@@ -41,7 +41,9 @@ Referer/CORS tricks needed.
 
 A multi-finger **open gesture** (default: **3-finger tap**, configurable in
 Setup) opens the media UI directly — no toolbar trip. **"Gesture opens"**
-chooses between the on-page panel and the full-page manager tab. Pick a gesture
+chooses the target: **bottom sheet** (the full Media Vault UI sliding over the
+page — default), the compact on-page panel, the browser's native popup sheet
+(where supported), or the full-page manager tab. Pick a gesture
 your phone's system doesn't already use (3-finger swipe down is often
 screenshot).
 

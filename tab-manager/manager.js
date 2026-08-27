@@ -584,7 +584,8 @@ async function renderSettings() {
             : groupsApiWorks === false ? 'NOT usable on this browser' + (state.groupError ? ' — ' + esc(state.groupError) : '')
             : HAS_GROUPS ? 'present, not yet probed (open the Groups tab)' : 'NOT available on this build'}</b></div>
         <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn" id="s-diag" data-ico="search" style="flex:1">Run diagnostics</button>
+          <button class="btn" id="s-diag" data-ico="search" style="flex:1">Diagnostics</button>
+          <button class="btn" id="s-cap" data-ico="zap" style="flex:1">Capabilities</button>
           <button class="btn" id="s-diagcopy" data-ico="copy" style="flex:0 0 auto"></button>
         </div>
         <pre id="s-diagout" class="diag" style="display:none"></pre>
@@ -641,12 +642,90 @@ async function renderSettings() {
         out.textContent = 'Running…';
         out.textContent = await runDiagnostics();
     };
+    $('#s-cap').onclick = async () => {
+        const out = $('#s-diagout');
+        out.style.display = 'block';
+        out.textContent = 'Probing…';
+        out.textContent = await probeCapabilities();
+    };
     $('#s-diagcopy').onclick = async () => {
         const out = $('#s-diagout');
         const text = (out.textContent && out.textContent !== 'Running…') ? out.textContent : await runDiagnostics();
         out.style.display = 'block'; out.textContent = text;
         navigator.clipboard.writeText(text).then(() => toast('Diagnostics copied'), () => toast('Copy failed'));
     };
+}
+
+/* Full sweep of what this browser exposes to THIS extension: presence of the
+ * chrome.* APIs worth having, then safe read-only calls to see which actually
+ * work (Android builds often ship the object but throw on use). Namespaces we
+ * did not request permission for correctly show as missing here. */
+async function probeCapabilities() {
+    const L = [];
+    const add = (k, v) => L.push(k.padEnd(32) + ': ' + v);
+    const has = p => { try { return p.split('.').reduce((o, k) => o && o[k], chrome) != null; } catch (e) { return false; } };
+
+    add('userAgent', (navigator.userAgent || '').slice(0, 110));
+    try {
+        const b = navigator.userAgentData && navigator.userAgentData.brands;
+        if (b && b.length) add('brands', b.map(x => x.brand + ' ' + x.version).join(' | '));
+    } catch (e) {}
+    L.push('');
+    L.push('--- API surface (this extension\'s permissions) ---');
+    const surface = [
+        'tabs.query', 'tabs.group', 'tabs.ungroup', 'tabs.discard', 'tabs.duplicate', 'tabs.captureVisibleTab',
+        'tabGroups.query', 'tabGroups.update', 'tabGroups.move',
+        'windows.getAll', 'windows.create', 'windows.update',
+        'sessions.getRecentlyClosed', 'sessions.restore',
+        'bookmarks.getTree', 'bookmarks.create',
+        'history.search', 'downloads.download', 'downloads.search',
+        'action.openPopup', 'action.setBadgeText',
+        'commands.getAll', 'contextMenus.create', 'notifications.create',
+        'sidePanel.open', 'scripting.executeScript',
+        'storage.session', 'runtime.getContexts',
+        'readingList.query', 'topSites.get', 'browsingData.remove',
+        'declarativeNetRequest.updateDynamicRules', 'omnibox.setDefaultSuggestion',
+        'idle.queryState', 'alarms.create', 'tts.speak', 'permissions.request'
+    ];
+    for (const pth of surface) add('chrome.' + pth, has(pth) ? 'present' : '-');
+
+    L.push('');
+    L.push('--- functional probes (safe, read-only) ---');
+    const probes = [
+        ['tabs.query({})', async () => (await chrome.tabs.query({})).length + ' tabs'],
+        ['tabGroups.query({})', async () => {
+            const g = await chrome.tabGroups.query({});
+            return g.length + ' group(s)' + (g.length ? ' ' + JSON.stringify(g.map(x => ({ id: x.id, title: x.title, color: x.color }))) : '');
+        }],
+        ['windows.getAll({})', async () => {
+            const w = await chrome.windows.getAll({});
+            return w.length + ' window(s) ' + JSON.stringify(w.map(x => x.type));
+        }],
+        ['sessions.getRecentlyClosed', async () => {
+            if (!chrome.sessions) throw new Error('namespace missing');
+            return (await chrome.sessions.getRecentlyClosed()).length + ' entries';
+        }],
+        ['bookmarks.getTree', async () => 'ok, ' + (await chrome.bookmarks.getTree()).length + ' root(s)'],
+        ['commands.getAll', async () => {
+            if (!chrome.commands) throw new Error('namespace missing');
+            return (await chrome.commands.getAll()).length + ' command(s)';
+        }],
+        ['storage.session set/get', async () => {
+            if (!chrome.storage.session) throw new Error('missing');
+            await chrome.storage.session.set({ _probe: 1 });
+            return 'works';
+        }],
+        ['runtime.getContexts', async () => {
+            if (!chrome.runtime.getContexts) throw new Error('missing');
+            return (await chrome.runtime.getContexts({})).length + ' context(s)';
+        }]
+    ];
+    for (const [name, fn] of probes) {
+        try { add(name, 'WORKS: ' + await fn()); }
+        catch (e) { add(name, 'ERROR: ' + ((e && e.message) || e)); }
+    }
+    add('TAB_GROUP_ID_NONE', String(chrome.tabGroups && chrome.tabGroups.TAB_GROUP_ID_NONE));
+    return L.join('\n');
 }
 
 /* Merge a previous "Export all data" JSON into the current install.
