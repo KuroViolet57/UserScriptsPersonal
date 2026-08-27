@@ -213,16 +213,19 @@ async function loadLive() {
     // Fallback: some builds group tabs in their own UI without reporting them,
     // yet the tabs still carry a usable groupId. Reconstruct groups from that.
     //
-    // Two guards against sentinel values masquerading as a group: real group ids
-    // are positive (Chrome uses -1 for "none", some Android builds use 0), and a
-    // "group" that contains every single tab is a sentinel, not a group.
+    // Guards against sentinel values masquerading as a group: whatever id the
+    // build itself declares as "none" (TAB_GROUP_ID_NONE — not always -1; some
+    // Android builds use 0), non-positive ids, and any "group" that contains
+    // every single tab (a constant, not a group).
+    const NONE_ID = (chrome.tabGroups && typeof chrome.tabGroups.TAB_GROUP_ID_NONE === 'number')
+        ? chrome.tabGroups.TAB_GROUP_ID_NONE : -1;
     if (!state.groups.length) {
         const counts = new Map();
         let total = 0;
         for (const w of state.windows) {
             for (const t of w.tabs) {
                 total++;
-                if (typeof t.groupId === 'number' && t.groupId > 0) {
+                if (typeof t.groupId === 'number' && t.groupId > 0 && t.groupId !== NONE_ID) {
                     counts.set(t.groupId, (counts.get(t.groupId) || 0) + 1);
                 }
             }
@@ -692,6 +695,10 @@ async function runDiagnostics() {
     add('chrome.bookmarks', typeof chrome.bookmarks);
     add('HAS_GROUPS (objects)', String(HAS_GROUPS));
     add('groups actually usable', String(groupsApiWorks));
+    // What this build itself calls "no group". If this prints 0, then tabs
+    // reporting groupId 0 are UNGROUPED by definition and the build simply
+    // never exposes grouping to extensions.
+    add('TAB_GROUP_ID_NONE', String(chrome.tabGroups && chrome.tabGroups.TAB_GROUP_ID_NONE));
 
     let q = 'not called';
     if (chrome.tabGroups && chrome.tabGroups.query) {
