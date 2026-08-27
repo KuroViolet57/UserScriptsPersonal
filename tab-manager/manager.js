@@ -11,6 +11,7 @@ const K = {
 const DEFAULT_SETTINGS = {
     batchSize: 10, batchDelaySec: 3, captureClosed: true,
     maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up', gestureTarget: 'sheet',
+    gesture2: 'off', gestureTarget2: 'groupsheet',
     popupW: 0, popupH: 0   // toolbar-popup size in px; 0 = browser default
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
@@ -571,7 +572,23 @@ async function renderSettings() {
         </select></div>
       <div class="field inline"><label>Gesture opens</label>
         <select id="s-gtarget">
-          <option value="sheet">Bottom sheet (on page)</option>
+          <option value="sheet">Full manager (bottom sheet)</option>
+          <option value="groupsheet">Current tab group (switcher)</option>
+          <option value="popup">Native browser sheet (if supported)</option>
+          <option value="tab">Full-page tab</option>
+        </select></div>
+      <div class="field inline"><label>Second gesture<span class="h">A separate gesture with its own target — e.g. one for the current group, one for everything.</span></label>
+        <select id="s-gesture2">
+          <option value="off">Off</option>
+          <option value="tap3">3-finger tap</option>
+          <option value="tap4">4-finger tap</option>
+          <option value="swipe3up">3-finger swipe up</option>
+          <option value="swipe3down">3-finger swipe down</option>
+        </select></div>
+      <div class="field inline"><label>Second gesture opens</label>
+        <select id="s-gtarget2">
+          <option value="groupsheet">Current tab group (switcher)</option>
+          <option value="sheet">Full manager (bottom sheet)</option>
           <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page tab</option>
         </select></div>
@@ -604,12 +621,16 @@ async function renderSettings() {
     paintIcons(box);
     $('#s-gesture').value = s.gesture || 'swipe3up';
     $('#s-gtarget').value = s.gestureTarget || 'sheet';
+    $('#s-gesture2').value = s.gesture2 || 'off';
+    $('#s-gtarget2').value = s.gestureTarget2 || 'groupsheet';
 
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
             captureClosed: $('#s-capture').checked,
             gesture: $('#s-gesture').value,
             gestureTarget: $('#s-gtarget').value,
+            gesture2: $('#s-gesture2').value,
+            gestureTarget2: $('#s-gtarget2').value,
             popupW: Math.max(0, Math.min(800, +$('#s-pw').value || 0)),
             popupH: Math.max(0, Math.min(900, +$('#s-ph').value || 0)),
             batchSize: Math.max(1, Math.min(50, +$('#s-batch').value || 10)),

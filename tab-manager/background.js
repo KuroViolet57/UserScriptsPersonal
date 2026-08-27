@@ -238,6 +238,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else if (msg.type === 'rebuild') {
                 await rebuildMirror();
                 sendResponse({ ok: true });
+            } else if (msg.type === 'getGroupSwitcher') {
+                // Tabs of the sender tab's group, for the in-page group switcher.
+                const tab = sender.tab;
+                if (!tab) { sendResponse({ ok: false, error: 'no sender tab' }); return; }
+                const NONE = (chrome.tabGroups && typeof chrome.tabGroups.TAB_GROUP_ID_NONE === 'number')
+                    ? chrome.tabGroups.TAB_GROUP_ID_NONE : -1;
+                const gid = (tab.groupId == null ? NONE : tab.groupId);
+                const grouped = gid !== NONE && gid > 0;      // 0 is a junk sentinel on some builds
+                let group = null, tabs = [];
+                if (grouped) {
+                    try { if (chrome.tabGroups && chrome.tabGroups.get) group = await chrome.tabGroups.get(gid); } catch (e) {}
+                    try { tabs = await chrome.tabs.query({ groupId: gid }); } catch (e) {}
+                }
+                sendResponse({
+                    ok: true, grouped,
+                    group: group ? { title: group.title || '', color: group.color || 'grey' } : null,
+                    activeId: tab.id,
+                    tabs: tabs.map(t => ({
+                        id: t.id, title: t.title || '', url: t.url || '',
+                        favIconUrl: t.favIconUrl || '', active: !!t.active, index: t.index
+                    })).sort((a, b) => a.index - b.index)
+                });
+            } else if (msg.type === 'activateTab') {
+                try {
+                    await chrome.tabs.update(msg.tabId, { active: true });
+                    const t = await chrome.tabs.get(msg.tabId);
+                    try { await chrome.windows.update(t.windowId, { focused: true }); } catch (e) {}
+                    sendResponse({ ok: true });
+                } catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
             } else if (msg.type === 'tryOpenPopup') {
                 // Ask the browser to show the action popup — Quetta presents it
                 // as its native bottom sheet. Not all builds allow this without

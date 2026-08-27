@@ -58,14 +58,18 @@ available on your build.
 
 ## Quick access (gesture & shortcuts)
 
-- **Open gesture** — a content script listens for a multi-finger gesture on any
-  page (default **3-finger swipe up**; configurable in ⚙ Setup, off / 3- or
-  4-finger tap / 3-finger swipe up or down). **"Gesture opens"** chooses the
-  target: a **bottom sheet** with the full manager sliding over the current page
-  (drag the handle down or tap the backdrop to dismiss — you never leave the
-  page; default), or the full-page manager in its own tab. If your phone's
-  system grabs a gesture — 3-finger swipe *down* is screenshot on many skins —
-  pick another.
+- **Two open gestures** — a content script listens for multi-finger gestures on
+  any page; each of the two slots picks a gesture (3-/4-finger tap, 3-finger
+  swipe up/down) and a target:
+  - **Full manager (bottom sheet)** — the whole manager over the current page
+  - **Current tab group (switcher)** — a compact sheet listing only the tabs of
+    the group you're in; tap a row to jump to it (falls back to the full
+    manager when the tab isn't grouped)
+  - **Native browser sheet** (where supported) or the **full-page tab**
+
+  Example: swipe-up = full manager, 3-finger tap = this group's switcher.
+  Avoid gestures your phone's system grabs (3-finger swipe *down* is screenshot
+  on many skins).
 - **Home screen**: open the manager full-page (⛶), then try the browser menu's
   *Add to home screen* / bookmark on that `chrome-extension://…/manager.html`
   URL. Browser support varies.
