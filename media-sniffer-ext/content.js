@@ -276,7 +276,19 @@
     function fireGesture() {
         if (settings.gestureTarget === 'tab') send({ type: 'openManagerTab' });
         else if (settings.gestureTarget === 'popup') {
-            send({ type: 'tryOpenPopup' }).then(r => { if (!r || !r.ok) openOverlay(null); });
+            // Fall back to the on-page panel only if the native sheet truly
+            // didn't open — judged by focus, since some builds open it while
+            // still reporting failure (which doubled the UIs).
+            let lostFocus = false;
+            const onBlur = () => { lostFocus = true; };
+            addEventListener('blur', onBlur, { once: true });
+            send({ type: 'tryOpenPopup' }).then(r => {
+                setTimeout(() => {
+                    removeEventListener('blur', onBlur);
+                    const opened = (r && r.ok) || lostFocus || !document.hasFocus();
+                    if (!opened) openOverlay(null);
+                }, 400);
+            });
         }
         else openOverlay(null);
     }

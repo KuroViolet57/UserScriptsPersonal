@@ -37,11 +37,22 @@
             try { chrome.runtime.sendMessage({ type: 'openManager' }, () => { void chrome.runtime.lastError; }); }
             catch (e) {}
         } else if (target === 'popup') {
-            // Prefer the browser's native popup sheet; fall back to ours.
+            // Prefer the browser's native popup sheet; fall back to ours ONLY
+            // if it truly didn't open. Some builds (Quetta) open the sheet yet
+            // still report failure / drop the response, which showed both
+            // sheets at once — so the real test is whether this page lost
+            // focus to the popup, not what the API claims.
+            let lostFocus = false;
+            const onBlur = () => { lostFocus = true; };
+            addEventListener('blur', onBlur, { once: true });
             try {
                 chrome.runtime.sendMessage({ type: 'tryOpenPopup' }, r => {
                     void chrome.runtime.lastError;
-                    if (!r || !r.ok) openSheet();
+                    setTimeout(() => {
+                        removeEventListener('blur', onBlur);
+                        const opened = (r && r.ok) || lostFocus || !document.hasFocus();
+                        if (!opened) openSheet();
+                    }, 400);
                 });
             } catch (e) { openSheet(); }
         } else {

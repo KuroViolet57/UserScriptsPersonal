@@ -52,7 +52,9 @@ exempt since their size can't be known.
 
 ## Install
 
-1. Copy the `media-sniffer-ext/` folder (or zip it).
+1. **Easiest:** open the prebuilt zip link on the phone —
+   <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/media-vault.zip> — it downloads ready to install.
+   (Or copy the `media-sniffer-ext/` folder and zip it yourself.)
 2. Browser → Extensions → enable Developer mode → **Load unpacked** / install
    from file.
 3. Play a video, then open the popup — or tap the button on the video itself.

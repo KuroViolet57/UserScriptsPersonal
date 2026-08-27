@@ -76,7 +76,9 @@ available on your build.
 
 Because the browser has to allow local extensions:
 
-1. Download/copy the `tab-manager/` folder onto the device (or zip it).
+1. **Easiest:** open the prebuilt zip link on the phone —
+   <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/tab-vault.zip> — it downloads ready to install.
+   (Or download/copy the `tab-manager/` folder and zip it yourself.)
 2. In the browser: **Settings → Extensions** (or `chrome://extensions`), enable
    **Developer mode** if present.
 3. **Load unpacked** / **Install from file** and pick the folder (or the `.zip`).

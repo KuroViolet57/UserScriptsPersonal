@@ -23,6 +23,12 @@ its contents. See each script's docs page for details.
 Manifest V3. Load it unpacked (or as a zip) in any Chromium browser that allows
 local extensions.
 
+**One-tap downloads** (open on the phone, then install the downloaded zip from
+the browser's extension screen — thanks to the pinned IDs it updates in place):
+
+- Tab Vault: <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/tab-vault.zip>
+- Media Vault: <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/media-vault.zip>
+
 ## Web apps
 
 | App | Description | Docs |
