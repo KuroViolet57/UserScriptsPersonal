@@ -271,20 +271,33 @@ async function renderSettings() {
     const s = r.settings || {};
     const box = $('#sec-settings');
     box.innerHTML = `
-      <div class="field inline"><label>On-video floating button<span class="h">Show the button over videos on pages</span></label>
+      <div class="tabhead">${svg('film', 13)}<span class="tt">ON-VIDEO BUTTON</span><span class="rule"></span></div>
+      <div class="field inline"><label>Show over videos</label>
         <input type="checkbox" id="s-btn" ${s.buttonOn ? 'checked' : ''}></div>
-      <div class="field inline"><label>Button size (px)</label>
+      <div class="field inline"><label>Size (px)</label>
         <input type="number" id="s-size" min="28" max="80" value="${s.buttonSize}"></div>
-      <div class="field inline"><label>Button corner</label>
+      <div class="field inline"><label>Corner</label>
         <select id="s-corner">
           <option value="tl">Top-left</option><option value="tr">Top-right</option>
           <option value="bl">Bottom-left</option><option value="br">Bottom-right</option>
         </select></div>
       <div class="field inline"><label>Min video size (px)<span class="h">Skip tiny thumbnail videos</span></label>
         <input type="number" id="s-minpx" min="0" max="1000" value="${s.minVideoPx}"></div>
-      <div class="field"><label>External player package<span class="h">Android package for "Player" (blank = system chooser). e.g. org.videolan.vlc, com.mxtech.videoplayer.ad</span></label>
+
+      <div class="tabhead" style="margin-top:18px">${svg('search', 13)}<span class="tt">DETECTION</span><span class="rule"></span></div>
+      <div class="field inline"><label>Ignore media smaller than (MB)<span class="h">Hides smaller files everywhere (streams/blob exempt); 0 keeps all</span></label>
+        <input type="number" id="s-minb" min="0" step="0.5" value="${((s.minSniffBytes || 0) / 1048576).toFixed(1).replace(/\.0$/, '')}"></div>
+      <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>
+        <input type="checkbox" id="s-collapse" ${s.collapseSegments ? 'checked' : ''}></div>
+      <div class="field inline"><label>Max entries per tab</label>
+        <input type="number" id="s-max" min="50" max="2000" value="${s.maxPerTab}"></div>
+
+      <div class="tabhead" style="margin-top:18px">${svg('external', 13)}<span class="tt">EXTERNAL PLAYER</span><span class="rule"></span></div>
+      <div class="field"><label>Player package<span class="h">Blank = system chooser. e.g. org.videolan.vlc, com.mxtech.videoplayer.ad</span></label>
         <input type="text" id="s-player" value="${s.playerPackage || ''}" placeholder="system chooser"></div>
-      <div class="field inline"><label>Open gesture<span class="h">Multi-finger gesture on any page opens the media panel. Avoid gestures your phone already grabs (3-finger-down is often screenshot).</span></label>
+
+      <div class="tabhead" style="margin-top:18px">${svg('play', 13)}<span class="tt">QUICK ACCESS</span><span class="rule"></span></div>
+      <div class="field inline"><label>Open gesture<span class="h">Avoid gestures your phone grabs (3-finger-down is often screenshot)</span></label>
         <select id="s-gesture">
           <option value="off">Off</option>
           <option value="tap3">3-finger tap</option>
@@ -292,25 +305,18 @@ async function renderSettings() {
           <option value="swipe3up">3-finger swipe up</option>
           <option value="swipe3down">3-finger swipe down</option>
         </select></div>
-      <div class="field inline"><label>Gesture opens<span class="h">What the gesture shows</span></label>
+      <div class="field inline"><label>Gesture opens</label>
         <select id="s-gtarget">
           <option value="sheet">Bottom sheet (on page)</option>
           <option value="panel">Media panel (on page)</option>
           <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page manager (tab)</option>
         </select></div>
-      <div class="field inline"><label>Toolbar popup width (px)<span class="h">Size of the small window from the toolbar icon. 0 = automatic; the browser caps the maximum.</span></label>
-        <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}"></div>
-      <div class="field inline"><label>Toolbar popup height (px)</label>
-        <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}"></div>
-      <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>
-        <input type="checkbox" id="s-collapse" ${s.collapseSegments ? 'checked' : ''}></div>
-      <div class="field inline"><label>Ignore media smaller than (MB)<span class="h">Hides smaller files everywhere (streams/blob exempt); 0 keeps everything</span></label>
-        <input type="number" id="s-minb" min="0" step="0.5" value="${((s.minSniffBytes || 0) / 1048576).toFixed(1).replace(/\.0$/, '')}"></div>
-      <div class="field inline"><label>Max entries per tab</label>
-        <input type="number" id="s-max" min="50" max="2000" value="${s.maxPerTab}"></div>
-      <div class="field"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
-      <hr>
+      <div class="field inline"><label>Toolbar popup size (px)<span class="h">Width × height of the icon popup. 0 = automatic; applies from the next open.</span></label>
+        <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}" style="width:70px">
+        <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}" style="width:70px"></div>
+
+      <div class="field" style="margin-top:18px"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
       <div class="field"><button class="btn d" id="s-clear" data-ico="trash" style="width:100%">Clear all detected media</button></div>`;
     paintIcons(box);
     $('#s-corner').value = s.buttonCorner || 'tr';

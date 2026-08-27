@@ -546,9 +546,22 @@ async function renderSettings() {
     const cw = await get(K.CLOSED_WINDOWS, []), ct = await get(K.CLOSED_TABS, []);
     const box = $('#sec-settings');
     box.innerHTML = `
+      <div class="sechead">${svg('inbox', 14)}<span class="st">Capture</span><span class="rule"></span></div>
       <div class="field inline"><label>Capture closed windows &amp; tabs<span class="h">Turn off to stop recording anything</span></label>
         <input type="checkbox" id="s-capture" ${s.captureClosed ? 'checked' : ''}></div>
-      <div class="field inline"><label>Open gesture<span class="h">Multi-finger gesture on any page opens the manager. If your phone grabs a gesture (e.g. 3-finger-down screenshot), pick another.</span></label>
+      <div class="field inline"><label>Keep closed windows<span class="h">Stored now: ${cw.length}</span></label>
+        <input type="number" id="s-mw" min="5" max="300" value="${s.maxClosedWindows}"></div>
+      <div class="field inline"><label>Keep closed tabs<span class="h">Stored now: ${ct.length}</span></label>
+        <input type="number" id="s-mt" min="10" max="2000" value="${s.maxClosedTabs}"></div>
+
+      <div class="sechead alt">${svg('restore', 14)}<span class="st">Restoring</span><span class="rule"></span></div>
+      <div class="field inline"><label>Batch size<span class="h">Tabs opened per batch</span></label>
+        <input type="number" id="s-batch" min="1" max="50" value="${s.batchSize}"></div>
+      <div class="field inline"><label>Batch delay (s)<span class="h">Pause between batches, max 20</span></label>
+        <input type="number" id="s-delay" min="0" max="20" value="${s.batchDelaySec}"></div>
+
+      <div class="sechead alt">${svg('zap', 14)}<span class="st">Quick access</span><span class="rule"></span></div>
+      <div class="field inline"><label>Open gesture<span class="h">Multi-finger gesture on any page. Avoid ones your phone grabs (3-finger-down is often screenshot).</span></label>
         <select id="s-gesture">
           <option value="off">Off</option>
           <option value="tap3">3-finger tap</option>
@@ -556,35 +569,27 @@ async function renderSettings() {
           <option value="swipe3up">3-finger swipe up</option>
           <option value="swipe3down">3-finger swipe down</option>
         </select></div>
-      <div class="field inline"><label>Gesture opens<span class="h">Sheet slides over the current page (swipe its handle down to dismiss); Tab opens the full-page manager.</span></label>
+      <div class="field inline"><label>Gesture opens</label>
         <select id="s-gtarget">
           <option value="sheet">Bottom sheet (on page)</option>
           <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page tab</option>
         </select></div>
-      <div class="field inline"><label>Toolbar popup width (px)<span class="h">Size of the small window from the toolbar icon. 0 = automatic; the browser caps the maximum.</span></label>
-        <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}"></div>
-      <div class="field inline"><label>Toolbar popup height (px)</label>
-        <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}"></div>
-      <div class="field inline"><label>Restore batch size<span class="h">Tabs opened per batch</span></label>
-        <input type="number" id="s-batch" min="1" max="50" value="${s.batchSize}"></div>
-      <div class="field inline"><label>Batch delay (seconds)<span class="h">Pause between batches (max 20)</span></label>
-        <input type="number" id="s-delay" min="0" max="20" value="${s.batchDelaySec}"></div>
-      <div class="field inline"><label>Keep closed windows<span class="h">Currently stored: ${cw.length}</span></label>
-        <input type="number" id="s-mw" min="5" max="300" value="${s.maxClosedWindows}"></div>
-      <div class="field inline"><label>Keep closed tabs<span class="h">Currently stored: ${ct.length}</span></label>
-        <input type="number" id="s-mt" min="10" max="2000" value="${s.maxClosedTabs}"></div>
-      <div class="field"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-      <div class="field"><button class="btn" id="s-export" data-ico="download" style="width:100%">Export all data (JSON)</button>
-        <div class="h">Sessions, saved groups and closed history.</div></div>
+      <div class="field inline"><label>Toolbar popup size (px)<span class="h">Width × height of the icon popup. 0 = automatic; applies from the next open.</span></label>
+        <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}" style="width:70px">
+        <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}" style="width:70px"></div>
+
+      <div class="field" style="margin-top:18px"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
+
+      <div class="sechead alt">${svg('save', 14)}<span class="st">Your data</span><span class="rule"></span></div>
+      <div class="field"><button class="btn" id="s-export" data-ico="download" style="width:100%">Export all data (JSON)</button></div>
       <div class="field"><button class="btn" id="s-import" data-ico="restore" style="width:100%">Import data (JSON)</button>
         <input type="file" id="s-importfile" accept=".json,application/json" style="display:none">
-        <div class="h">Merges a previous export into this install — nothing is overwritten, duplicates are skipped. Use this to carry data across reinstalls.</div></div>
+        <div class="h">Import merges a previous export — nothing overwritten, duplicates skipped.</div></div>
       <div class="field"><button class="btn d" id="s-clearclosed" data-ico="trash" style="width:100%">Clear closed history</button></div>
-      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+
+      <div class="sechead alt">${svg('search', 14)}<span class="st">Diagnostics</span><span class="rule"></span></div>
       <div class="field">
-        <label>Diagnostics</label>
         <div class="h">Tab groups: <b>${groupsApiWorks === true ? 'working'
             : groupsApiWorks === false ? 'NOT usable on this browser' + (state.groupError ? ' — ' + esc(state.groupError) : '')
             : HAS_GROUPS ? 'present, not yet probed (open the Groups tab)' : 'NOT available on this build'}</b></div>
