@@ -238,6 +238,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else if (msg.type === 'rebuild') {
                 await rebuildMirror();
                 sendResponse({ ok: true });
+            } else if (msg.type === 'tryOpenPopup') {
+                // Ask the browser to show the action popup — Quetta presents it
+                // as its native bottom sheet. Not all builds allow this without
+                // a toolbar click; the caller falls back to the custom sheet.
+                if (chrome.action && chrome.action.openPopup) {
+                    try { await chrome.action.openPopup(); sendResponse({ ok: true }); }
+                    catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
+                } else sendResponse({ ok: false, error: 'openPopup unsupported' });
             } else if (msg.type === 'openManager') {
                 // gesture from the content script: open the full-page manager,
                 // reusing an existing manager tab if one is already open

@@ -295,6 +295,7 @@ async function renderSettings() {
       <div class="field inline"><label>Gesture opens<span class="h">What the gesture shows</span></label>
         <select id="s-gtarget">
           <option value="panel">Media panel (on page)</option>
+          <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page manager (tab)</option>
         </select></div>
       <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>

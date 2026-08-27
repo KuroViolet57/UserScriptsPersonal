@@ -36,6 +36,14 @@
         if (target === 'tab') {
             try { chrome.runtime.sendMessage({ type: 'openManager' }, () => { void chrome.runtime.lastError; }); }
             catch (e) {}
+        } else if (target === 'popup') {
+            // Prefer the browser's native popup sheet; fall back to ours.
+            try {
+                chrome.runtime.sendMessage({ type: 'tryOpenPopup' }, r => {
+                    void chrome.runtime.lastError;
+                    if (!r || !r.ok) openSheet();
+                });
+            } catch (e) { openSheet(); }
         } else {
             openSheet();
         }
@@ -58,9 +66,13 @@
             transform:translateY(105%);transition:transform .26s cubic-bezier(.2,.8,.3,1);
             touch-action:none}
         #tv-sheet.show{transform:translateY(0)}
-        #tv-sheet .tv-grab{flex:0 0 auto;padding:9px 0 7px;display:flex;justify-content:center;
-            background:#181823;cursor:grab}
-        #tv-sheet .tv-grab span{width:44px;height:5px;border-radius:3px;background:#3a3a4c}
+        #tv-sheet .tv-grab{flex:0 0 auto;height:40px;display:flex;align-items:center;
+            background:#181823;cursor:grab;position:relative;touch-action:none}
+        #tv-sheet .tv-grab .tv-pill{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+            width:52px;height:5.5px;border-radius:3px;background:#4a4a5e}
+        #tv-sheet .tv-grab .tv-close{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+            width:32px;height:32px;border:none;border-radius:9px;background:#22222f;color:#9a9ab0;
+            font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center}
         #tv-sheet iframe{flex:1;border:none;width:100%;background:#0f0f17}`;
         (document.head || document.documentElement).appendChild(s);
     }
@@ -75,7 +87,8 @@
         sheet.id = 'tv-sheet';
         const grab = document.createElement('div');
         grab.className = 'tv-grab';
-        grab.innerHTML = '<span></span>';
+        grab.innerHTML = '<span class="tv-pill"></span><button class="tv-close">✕</button>';
+        grab.querySelector('.tv-close').addEventListener('click', closeSheet);
         const frame = document.createElement('iframe');
         frame.src = chrome.runtime.getURL('manager.html');
         sheet.appendChild(grab);
@@ -86,22 +99,26 @@
         requestAnimationFrame(() => { sheetWrap && sheetWrap.classList.add('show'); sheet.classList.add('show'); });
         sheetWrap.addEventListener('click', closeSheet);
 
-        // drag the handle down to dismiss
-        let sy = 0, dy = 0, dragging = false;
+        // drag the bar (full-width, 40px tall) down to dismiss; a quick flick
+        // closes too, so precision isn't required
+        let sy = 0, dy = 0, dragging = false, lastY = 0, lastT = 0, vel = 0;
         grab.addEventListener('touchstart', e => {
-            dragging = true; sy = e.touches[0].clientY; dy = 0;
+            dragging = true; sy = lastY = e.touches[0].clientY; dy = 0; vel = 0; lastT = Date.now();
             sheet.style.transition = 'none';
         }, { passive: true });
         grab.addEventListener('touchmove', e => {
             if (!dragging) return;
-            dy = Math.max(0, e.touches[0].clientY - sy);
+            const y = e.touches[0].clientY, t = Date.now();
+            if (t > lastT) vel = (y - lastY) / (t - lastT);      // px per ms, + = down
+            lastY = y; lastT = t;
+            dy = Math.max(0, y - sy);
             sheet.style.transform = `translateY(${dy}px)`;
         }, { passive: true });
         const endDrag = () => {
             if (!dragging) return;
             dragging = false;
             sheet.style.transition = '';
-            if (dy > 110) closeSheet();
+            if (dy > 80 || (dy > 24 && vel > 0.45)) closeSheet();
             else sheet.style.transform = '';
         };
         grab.addEventListener('touchend', endDrag, { passive: true });

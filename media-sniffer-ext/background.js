@@ -262,6 +262,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     }
                     sendResponse({ ok: true, items: all });
                 }
+            } else if (msg.type === 'tryOpenPopup') {
+                if (chrome.action && chrome.action.openPopup) {
+                    try { await chrome.action.openPopup(); sendResponse({ ok: true }); }
+                    catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
+                } else sendResponse({ ok: false, error: 'openPopup unsupported' });
             } else if (msg.type === 'openManagerTab') {
                 const url = chrome.runtime.getURL('media.html');
                 const existing = await chrome.tabs.query({ url });

@@ -275,6 +275,9 @@
      * Android skins, so avoid that one if your phone grabs it). */
     function fireGesture() {
         if (settings.gestureTarget === 'tab') send({ type: 'openManagerTab' });
+        else if (settings.gestureTarget === 'popup') {
+            send({ type: 'tryOpenPopup' }).then(r => { if (!r || !r.ok) openOverlay(null); });
+        }
         else openOverlay(null);
     }
 

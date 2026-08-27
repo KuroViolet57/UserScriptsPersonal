@@ -558,6 +558,7 @@ async function renderSettings() {
       <div class="field inline"><label>Gesture opens<span class="h">Sheet slides over the current page (swipe its handle down to dismiss); Tab opens the full-page manager.</span></label>
         <select id="s-gtarget">
           <option value="sheet">Bottom sheet (on page)</option>
+          <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page tab</option>
         </select></div>
       <div class="field inline"><label>Restore batch size<span class="h">Tabs opened per batch</span></label>
