@@ -10,7 +10,8 @@ const K = {
 };
 const DEFAULT_SETTINGS = {
     batchSize: 10, batchDelaySec: 3, captureClosed: true,
-    maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up', gestureTarget: 'sheet'
+    maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up', gestureTarget: 'sheet',
+    popupW: 0, popupH: 0   // toolbar-popup size in px; 0 = browser default
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const HAS_GROUPS = !!(chrome.tabGroups && chrome.tabs.group);
@@ -561,6 +562,10 @@ async function renderSettings() {
           <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page tab</option>
         </select></div>
+      <div class="field inline"><label>Toolbar popup width (px)<span class="h">Size of the small window from the toolbar icon. 0 = automatic; the browser caps the maximum.</span></label>
+        <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}"></div>
+      <div class="field inline"><label>Toolbar popup height (px)</label>
+        <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}"></div>
       <div class="field inline"><label>Restore batch size<span class="h">Tabs opened per batch</span></label>
         <input type="number" id="s-batch" min="1" max="50" value="${s.batchSize}"></div>
       <div class="field inline"><label>Batch delay (seconds)<span class="h">Pause between batches (max 20)</span></label>
@@ -600,6 +605,8 @@ async function renderSettings() {
             captureClosed: $('#s-capture').checked,
             gesture: $('#s-gesture').value,
             gestureTarget: $('#s-gtarget').value,
+            popupW: Math.max(0, Math.min(800, +$('#s-pw').value || 0)),
+            popupH: Math.max(0, Math.min(900, +$('#s-ph').value || 0)),
             batchSize: Math.max(1, Math.min(50, +$('#s-batch').value || 10)),
             batchDelaySec: Math.max(0, Math.min(20, +$('#s-delay').value || 3)),
             maxClosedWindows: Math.max(5, Math.min(300, +$('#s-mw').value || 50)),
@@ -1083,6 +1090,21 @@ $('#jobcancel').onclick = async () => {
     await send({ type: 'cancelOpen' });
     clearInterval(jobTimer); $('#jobbar').classList.add('hidden'); toast('Restore cancelled');
 };
+
+/* Toolbar popups size themselves to the page's intrinsic size, so "width:100%"
+ * collapses to the minimum. When running AS a popup (top window, no tab of our
+ * own — full-page mode and the iframe sheet both skip this), apply the
+ * configured fixed size. */
+(async () => {
+    if (window.self !== window.top) return;
+    try {
+        const cur = await new Promise(r => chrome.tabs.getCurrent(t => { void chrome.runtime.lastError; r(t); }));
+        if (cur) return;                       // full-page tab: stay fluid
+        const s = await getSettings();
+        if (s.popupW) document.body.style.width = s.popupW + 'px';
+        if (s.popupH) { document.body.style.height = s.popupH + 'px'; document.body.style.minHeight = '0'; }
+    } catch (e) {}
+})();
 
 paintIcons();
 get(K.OPEN_JOB, null).then(j => { if (j) watchJob(); });

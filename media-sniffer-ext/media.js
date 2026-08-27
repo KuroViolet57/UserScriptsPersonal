@@ -299,6 +299,10 @@ async function renderSettings() {
           <option value="popup">Native browser sheet (if supported)</option>
           <option value="tab">Full-page manager (tab)</option>
         </select></div>
+      <div class="field inline"><label>Toolbar popup width (px)<span class="h">Size of the small window from the toolbar icon. 0 = automatic; the browser caps the maximum.</span></label>
+        <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}"></div>
+      <div class="field inline"><label>Toolbar popup height (px)</label>
+        <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}"></div>
       <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>
         <input type="checkbox" id="s-collapse" ${s.collapseSegments ? 'checked' : ''}></div>
       <div class="field inline"><label>Ignore media smaller than (MB)<span class="h">Hides smaller files everywhere (streams/blob exempt); 0 keeps everything</span></label>
@@ -317,6 +321,8 @@ async function renderSettings() {
             buttonOn: $('#s-btn').checked,
             gesture: $('#s-gesture').value,
             gestureTarget: $('#s-gtarget').value,
+            popupW: Math.max(0, Math.min(800, +$('#s-pw').value || 0)),
+            popupH: Math.max(0, Math.min(900, +$('#s-ph').value || 0)),
             buttonSize: Math.max(28, Math.min(80, +$('#s-size').value || 44)),
             buttonCorner: $('#s-corner').value,
             minVideoPx: Math.max(0, Math.min(1000, +$('#s-minpx').value || 120)),
@@ -348,6 +354,18 @@ $('#refresh').onclick = () => render();
 $('#expand').onclick = () => { chrome.tabs.create({ url: chrome.runtime.getURL('media.html') }); window.close(); };
 
 (async () => {
+    // Popup-only fixed sizing (full-page tab and the iframe sheet stay fluid).
+    if (window.self === window.top) {
+        try {
+            const cur = await new Promise(r => chrome.tabs.getCurrent(t => { void chrome.runtime.lastError; r(t); }));
+            if (!cur) {
+                const r = await send({ type: 'getSettings' });
+                const sp = (r.ok && r.settings) || {};
+                if (sp.popupW) document.body.style.width = sp.popupW + 'px';
+                if (sp.popupH) { document.body.style.height = sp.popupH + 'px'; document.body.style.minHeight = '0'; }
+            }
+        } catch (e) {}
+    }
     state.filter = Object.assign(state.filter, await get('filter', {}));
     $('#search').value = state.filter.query || '';
     $('#f-type').value = state.filter.type || 'all';

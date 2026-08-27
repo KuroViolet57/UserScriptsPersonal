@@ -24,7 +24,8 @@ const DEFAULT_SETTINGS = {
     maxPerTab: 300,
     minSniffBytes: 0,        // ignore network media smaller than this (0 = keep all)
     gesture: 'tap3',         // off | tap3 | tap4 | swipe3up | swipe3down
-    gestureTarget: 'sheet'   // sheet | panel (on-page) | popup (native) | tab
+    gestureTarget: 'sheet',  // sheet | panel (on-page) | popup (native) | tab
+    popupW: 0, popupH: 0     // toolbar-popup size in px; 0 = browser default
 };
 
 /* ------------------------------ storage ------------------------------ */
