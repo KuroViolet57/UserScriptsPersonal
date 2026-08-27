@@ -110,9 +110,15 @@ install is always safe.
 > current install, so carry data over once via Export → install v1.5.1+ →
 > Import → remove the old copy. Every update after that lands in place.
 
-> No icon files are included, so the browser shows its default extension icon.
-> Drop `icon-48.png` / `icon-128.png` into the folder and add an `"icons"` block
-> to `manifest.json` if you want a custom one.
+### Vivaldi (Android snapshot) flow
+
+Vivaldi uses desktop Chrome's extensions page: **Load unpacked** registers a
+*folder*, and the **Update** button reloads every unpacked extension from disk.
+
+- One-time: unzip into a permanent folder (e.g. `Download/extensions/tab-vault/`)
+  and Load unpacked from there.
+- Every update: extract the new zip into the **same folder, overwriting**, then
+  tap **Update** on `vivaldi://extensions`. Same ID, data intact, no reinstall.
 
 ## How closed-window capture works
 

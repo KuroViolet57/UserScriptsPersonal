@@ -58,7 +58,9 @@ exempt since their size can't be known.
    <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/media-vault.zip> — it downloads ready to install.
    (Or copy the `media-sniffer-ext/` folder and zip it yourself.)
 2. Browser → Extensions → enable Developer mode → **Load unpacked** / install
-   from file.
+   from file. On **Vivaldi**: unzip to a permanent folder, Load unpacked from it,
+   and for updates extract the new zip over that folder and tap **Update** on
+   `vivaldi://extensions`.
 3. Play a video, then open the popup — or tap the button on the video itself.
 
 ## Updating
