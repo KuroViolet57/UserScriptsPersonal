@@ -612,6 +612,12 @@ async function renderSettings() {
             maxClosedWindows: Math.max(5, Math.min(300, +$('#s-mw').value || 50)),
             maxClosedTabs: Math.max(10, Math.min(2000, +$('#s-mt').value || 300))
         });
+        try {
+            const pw = Math.max(0, Math.min(800, +$('#s-pw').value || 0));
+            const ph = Math.max(0, Math.min(900, +$('#s-ph').value || 0));
+            localStorage.setItem('popupW', pw); localStorage.setItem('popupH', ph);
+            if (window.__isPopup) applyPopupSizeStyle(pw, ph);
+        } catch (e) {}
         toast('Settings saved');
     };
     $('#s-import').onclick = () => $('#s-importfile').click();
@@ -1091,18 +1097,27 @@ $('#jobcancel').onclick = async () => {
     clearInterval(jobTimer); $('#jobbar').classList.add('hidden'); toast('Restore cancelled');
 };
 
-/* Toolbar popups size themselves to the page's intrinsic size, so "width:100%"
- * collapses to the minimum. When running AS a popup (top window, no tab of our
- * own — full-page mode and the iframe sheet both skip this), apply the
- * configured fixed size. */
+function applyPopupSizeStyle(w, h) {
+    let st = document.getElementById('popup-size-style');
+    if (!w && !h) { if (st) st.remove(); return; }
+    if (!st) { st = document.createElement('style'); st.id = 'popup-size-style'; document.head.appendChild(st); }
+    st.textContent = 'html,body{' + (w ? 'width:' + w + 'px !important;' : '') +
+        (h ? 'height:' + h + 'px !important;min-height:0 !important;' : '') + '}';
+}
+
+/* popup-size.js already applied the saved size synchronously (popup windows
+ * are measured once, at first layout, so it must be there before first paint).
+ * Here we just clean up per context: a full-page tab goes back to fluid, a
+ * popup refreshes the localStorage mirror so the NEXT open uses new settings. */
 (async () => {
-    if (window.self !== window.top) return;
+    if (window.self !== window.top) return;    // iframe sheet: fluid, no style
     try {
         const cur = await new Promise(r => chrome.tabs.getCurrent(t => { void chrome.runtime.lastError; r(t); }));
-        if (cur) return;                       // full-page tab: stay fluid
+        if (cur) { applyPopupSizeStyle(0, 0); return; }        // full-page tab
+        window.__isPopup = true;
         const s = await getSettings();
-        if (s.popupW) document.body.style.width = s.popupW + 'px';
-        if (s.popupH) { document.body.style.height = s.popupH + 'px'; document.body.style.minHeight = '0'; }
+        try { localStorage.setItem('popupW', s.popupW || 0); localStorage.setItem('popupH', s.popupH || 0); } catch (e) {}
+        applyPopupSizeStyle(s.popupW || 0, s.popupH || 0);
     } catch (e) {}
 })();
 

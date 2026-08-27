@@ -331,6 +331,12 @@ async function renderSettings() {
             minSniffBytes: Math.round(Math.max(0, +$('#s-minb').value || 0) * 1048576),
             maxPerTab: Math.max(50, Math.min(2000, +$('#s-max').value || 300))
         } });
+        try {
+            const pw = Math.max(0, Math.min(800, +$('#s-pw').value || 0));
+            const ph = Math.max(0, Math.min(900, +$('#s-ph').value || 0));
+            localStorage.setItem('popupW', pw); localStorage.setItem('popupH', ph);
+            if (window.__isPopup) applyPopupSizeStyle(pw, ph);
+        } catch (e) {}
         toast('Settings saved');
     };
     $('#s-clear').onclick = async () => {
@@ -353,16 +359,28 @@ function saveFilter() { set('filter', state.filter); }
 $('#refresh').onclick = () => render();
 $('#expand').onclick = () => { chrome.tabs.create({ url: chrome.runtime.getURL('media.html') }); window.close(); };
 
+function applyPopupSizeStyle(w, h) {
+    let st = document.getElementById('popup-size-style');
+    if (!w && !h) { if (st) st.remove(); return; }
+    if (!st) { st = document.createElement('style'); st.id = 'popup-size-style'; document.head.appendChild(st); }
+    st.textContent = 'html,body{' + (w ? 'width:' + w + 'px !important;' : '') +
+        (h ? 'height:' + h + 'px !important;min-height:0 !important;' : '') + '}';
+}
+
 (async () => {
-    // Popup-only fixed sizing (full-page tab and the iframe sheet stay fluid).
+    // popup-size.js applied the saved size synchronously (popups are measured
+    // once, at first layout). Clean up per context: full-page goes fluid, the
+    // popup refreshes the localStorage mirror for the next open.
     if (window.self === window.top) {
         try {
             const cur = await new Promise(r => chrome.tabs.getCurrent(t => { void chrome.runtime.lastError; r(t); }));
-            if (!cur) {
+            if (cur) applyPopupSizeStyle(0, 0);
+            else {
+                window.__isPopup = true;
                 const r = await send({ type: 'getSettings' });
                 const sp = (r.ok && r.settings) || {};
-                if (sp.popupW) document.body.style.width = sp.popupW + 'px';
-                if (sp.popupH) { document.body.style.height = sp.popupH + 'px'; document.body.style.minHeight = '0'; }
+                try { localStorage.setItem('popupW', sp.popupW || 0); localStorage.setItem('popupH', sp.popupH || 0); } catch (e) {}
+                applyPopupSizeStyle(sp.popupW || 0, sp.popupH || 0);
             }
         } catch (e) {}
     }
