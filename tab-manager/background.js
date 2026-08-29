@@ -26,7 +26,8 @@ const DEFAULT_SETTINGS = {
     batchDelaySec: 3,
     captureClosed: true,
     maxClosedWindows: 50,
-    maxClosedTabs: 300
+    maxClosedTabs: 300,
+    restoreUnloaded: true
 };
 
 /* ------------------------------ storage ------------------------------ */
@@ -190,20 +191,33 @@ let job = null;
 async function runOpenJob(urls, mode, windowId) {
     if (job) return { ok: false, error: 'A restore is already running' };
     const s = await getSettings();
+    const unload = !!s.restoreUnloaded && !!(chrome.tabs && chrome.tabs.discard);
+
+    // Create a background tab and immediately discard it: the tab exists with
+    // its URL but nothing loads until the user taps it. This is what lets a
+    // 400-tab restore actually produce 400 tabs instead of choking the
+    // browser — memory/network stay flat.
+    const mkTab = async props => {
+        try {
+            const t = await chrome.tabs.create(Object.assign({ active: false }, props));
+            if (unload && t && t.id != null) { try { await chrome.tabs.discard(t.id); } catch (e) {} }
+            return t;
+        } catch (e) { return null; }
+    };
 
     if (mode === 'window') {
-        const chunk = urls.slice(0, 30);
+        // When unloading, seed the window with just the first URL (a window
+        // created with 30 URLs loads all 30 at once) and add the rest discarded.
+        const chunk = unload ? urls.slice(0, 1) : urls.slice(0, 30);
         const win = await chrome.windows.create({ url: chunk });
-        for (let i = 30; i < urls.length; i++) {
-            await chrome.tabs.create({ url: urls[i], windowId: win.id, active: false });
+        for (let i = chunk.length; i < urls.length; i++) {
+            await mkTab({ url: urls[i], windowId: win.id });
         }
         return { ok: true, opened: urls.length };
     }
 
     if (mode === 'all') {
-        for (const u of urls) {
-            try { await chrome.tabs.create({ url: u, active: false, windowId }); } catch (e) {}
-        }
+        for (const u of urls) await mkTab({ url: u, windowId });
         return { ok: true, opened: urls.length };
     }
 
@@ -216,7 +230,7 @@ async function runOpenJob(urls, mode, windowId) {
         if (!job || job.cancelled) { job = null; await set(K.OPEN_JOB, null); return; }
         const end = Math.min(job.done + batch, urls.length);
         for (; job.done < end; job.done++) {
-            try { await chrome.tabs.create({ url: urls[job.done], active: false, windowId }); } catch (e) {}
+            await mkTab({ url: urls[job.done], windowId });
         }
         await set(K.OPEN_JOB, { done: job.done, total: job.total });
         if (job.done < urls.length) setTimeout(step, delay);

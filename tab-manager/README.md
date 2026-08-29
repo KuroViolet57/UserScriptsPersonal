@@ -54,11 +54,24 @@ session, copy the URLs, or forget them. This matters most on browsers like
 Quetta that report every tab as its own window: closing 66 tabs lands as 66
 one-tab "windows", and the bulk bar is how you take them all back in one tap.
 
+**Range select:** tick one box, then **long-press** another one further down —
+every box between the two gets ticked (shift+click on desktop). Works in
+Open, Closed and History.
+
+**Restores don't choke the browser:** by default restored tabs are opened
+**unloaded** (created, then immediately discarded) — they all appear
+instantly with their URLs, but a page only loads when you tap its tab. This
+is what makes reopening hundreds of tabs actually work; without it the
+browser tries to load them all at once and silently drops most of them.
+Toggle under ⚙ Setup → Restoring if you prefer eager loading.
+
 ### History
 Search your **browsing history** and reopen any of it: filter by Today /
-Yesterday / last 7 or 30 days / a specific day / all time, search text, tick
-the pages you want, and open them together — batched, in a new window, or as
-one tab group. Uses an **optional permission**: nothing is requested (or read)
+Yesterday / last 7 or 30 days / a specific day / all time, search text, and
+narrow to a **time-of-day window** ("between … and …" — leave *between* empty
+for "before 07:00"; a window crossing midnight wraps correctly). Tick the
+pages you want and open them together — batched, in a new window, or as one
+tab group. Uses an **optional permission**: nothing is requested (or read)
 until you tap *Grant history access* the first time. Where the browser refuses
 to create real groups, the selection is saved as a Tab Vault group instead, so
 the set is never lost.

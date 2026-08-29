@@ -12,7 +12,8 @@ const DEFAULT_SETTINGS = {
     batchSize: 10, batchDelaySec: 3, captureClosed: true,
     maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up', gestureTarget: 'sheet',
     gesture2: 'off', gestureTarget2: 'groupsheet',
-    popupW: 0, popupH: 0   // toolbar-popup size in px; 0 = browser default
+    popupW: 0, popupH: 0,  // toolbar-popup size in px; 0 = browser default
+    restoreUnloaded: true  // discard restored tabs so they load only when tapped
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const HAS_GROUPS = !!(chrome.tabGroups && chrome.tabs.group);
@@ -111,7 +112,10 @@ let state = {
     histSel: new Set(),             // history item URLs
     closedShown: { wins: [], tabs: [] },
     histShown: [],
-    histRange: 'today', histDate: '', histMax: 300
+    histRange: 'today', histDate: '', histMax: 300,
+    histFrom: '', histTo: '',       // time-of-day window (hh:mm)
+    rowOrder: [],                   // display order of selectable ids, per section
+    lastSelIdx: -1                  // anchor for long-press / shift range select
 };
 
 /* ------------------------------ helpers ------------------------------ */
@@ -167,6 +171,54 @@ function askText(title, initial, extra) {
         m.addEventListener('click', e => { if (e.target === m) done(null); });
         document.body.appendChild(m);
         setTimeout(() => input.focus(), 50);
+    });
+}
+
+/* ------------------------- range selection --------------------------
+ * Every selectable checkbox registers its position in state.rowOrder.
+ * Tap one box, then LONG-PRESS (or shift+click) another: everything between
+ * the two gets selected. */
+function rerenderList() {
+    if (state.section === 'open') { renderOpen(); renderActions(); }
+    else if (state.section === 'closed') renderClosed().then(renderActions);
+    else if (state.section === 'hist') renderHist().then(renderActions);
+}
+function selectRangeTo(index) {
+    const sel = sectionSelection();
+    if (!sel) return;
+    const a = state.lastSelIdx >= 0 ? Math.min(state.lastSelIdx, index) : index;
+    const b = state.lastSelIdx >= 0 ? Math.max(state.lastSelIdx, index) : index;
+    for (let i = a; i <= b; i++) {
+        const id = state.rowOrder[i];
+        if (id !== undefined) sel.add(id);
+    }
+    state.lastSelIdx = index;
+    rerenderList();
+}
+function rangeSelectable(cb, index) {
+    // Registered BEFORE the row's own onchange, so stopImmediatePropagation
+    // can swallow the stray toggle the browser fires after a long-press.
+    cb.addEventListener('change', e => {
+        if (cb.__lp) { cb.__lp = false; e.stopImmediatePropagation(); return; }
+        state.lastSelIdx = index;
+    });
+    let timer = null, fired = false;
+    cb.addEventListener('touchstart', () => {
+        fired = false;
+        timer = setTimeout(() => { fired = true; cb.__lp = true; selectRangeTo(index); }, 420);
+    }, { passive: true });
+    cb.addEventListener('touchmove', () => clearTimeout(timer), { passive: true });
+    cb.addEventListener('touchcancel', () => clearTimeout(timer));
+    cb.addEventListener('touchend', e => {
+        clearTimeout(timer);
+        if (fired && e.cancelable) e.preventDefault();   // swallow the synthetic click
+    });
+    cb.addEventListener('contextmenu', e => { if (fired) e.preventDefault(); });
+    cb.addEventListener('click', e => {                  // desktop equivalent
+        if (e.shiftKey && state.lastSelIdx >= 0 && state.lastSelIdx !== index) {
+            e.preventDefault();
+            selectRangeTo(index);
+        }
     });
 }
 
@@ -259,6 +311,7 @@ function groupOf(id) { return state.groups.find(g => g.id === id); }
 /* ------------------------------ render ------------------------------ */
 async function render() {
     const s = state.section;
+    if (state.prevSection !== s) { state.lastSelIdx = -1; state.prevSection = s; }
     document.body.dataset.sec = s;
     document.querySelectorAll('.sec').forEach(x => x.classList.add('hidden'));
     $('#sec-' + s).classList.remove('hidden');
@@ -288,6 +341,7 @@ async function renderCounts() {
 function tabRow(t) {
     const row = el('div', 'row' + (state.selected.has(t.id) ? ' sel' : ''));
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = state.selected.has(t.id);
+    rangeSelectable(cb, state.rowOrder.push(t.id) - 1);
     cb.onchange = () => {
         if (cb.checked) state.selected.add(t.id); else state.selected.delete(t.id);
         row.classList.toggle('sel', cb.checked); renderActions();
@@ -322,6 +376,7 @@ function tabRow(t) {
 
 function renderOpen() {
     const box = $('#sec-open'); box.innerHTML = '';
+    state.rowOrder = [];
     let shown = 0;
     let wn = 0;
     for (const w of state.windows) {
@@ -463,10 +518,12 @@ async function renderClosed() {
     const wins = (await get(K.CLOSED_WINDOWS, [])).filter(w => !state.query || w.tabs.some(matches));
     const tabs = (await get(K.CLOSED_TABS, [])).filter(matches).slice(0, 200);
     state.closedShown = { wins, tabs };
+    state.rowOrder = [];
 
     const selCb = (id) => {
         const cb = el('input'); cb.type = 'checkbox';
         cb.checked = state.closedSel.has(id);
+        rangeSelectable(cb, state.rowOrder.push(id) - 1);
         cb.onchange = () => {
             if (cb.checked) state.closedSel.add(id); else state.closedSel.delete(id);
             renderActions();
@@ -613,15 +670,24 @@ async function renderHist() {
           <option value="all">All time</option>
         </select>
         <input type="date" id="h-date" style="display:none">
-        <input type="number" id="h-max" min="20" max="2000" step="20" title="Max results">`;
+        <input type="number" id="h-max" min="20" max="2000" step="20" title="Max results">
+        <span class="hlbl">between</span>
+        <input type="time" id="h-from" title="Only pages visited from this time of day">
+        <span class="hlbl">and</span>
+        <input type="time" id="h-to" title="Only pages visited before this time of day">`;
     box.appendChild(bar);
     const rangeSel = bar.querySelector('#h-range'), dateIn = bar.querySelector('#h-date'), maxIn = bar.querySelector('#h-max');
+    const fromIn = bar.querySelector('#h-from'), toIn = bar.querySelector('#h-to');
     rangeSel.value = state.histRange; maxIn.value = state.histMax;
     dateIn.style.display = state.histRange === 'day' ? '' : 'none';
     if (state.histDate) dateIn.value = state.histDate;
-    rangeSel.onchange = () => { state.histRange = rangeSel.value; renderHist().then(renderActions); };
-    dateIn.onchange = () => { state.histDate = dateIn.value; renderHist().then(renderActions); };
-    maxIn.onchange = () => { state.histMax = Math.max(20, Math.min(2000, +maxIn.value || 300)); renderHist().then(renderActions); };
+    fromIn.value = state.histFrom; toIn.value = state.histTo;
+    const rerun = () => renderHist().then(renderActions);
+    rangeSel.onchange = () => { state.histRange = rangeSel.value; rerun(); };
+    dateIn.onchange = () => { state.histDate = dateIn.value; rerun(); };
+    maxIn.onchange = () => { state.histMax = Math.max(20, Math.min(2000, +maxIn.value || 300)); rerun(); };
+    fromIn.onchange = () => { state.histFrom = fromIn.value; rerun(); };
+    toIn.onchange = () => { state.histTo = toIn.value; rerun(); };
 
     const { start, end } = histRangeBounds();
     let items = [];
@@ -637,6 +703,20 @@ async function renderHist() {
         return;
     }
     items = items.filter(h => isRestorable(h.url));
+
+    // Time-of-day window on the last visit: "before 07:00" = leave 'between'
+    // empty and set 'and' to 07:00. A window crossing midnight (23:00→06:00)
+    // wraps and works too.
+    const toMin = v => { const m = /^(\d{1,2}):(\d{2})/.exec(v || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+    const fromM = toMin(state.histFrom), toM = toMin(state.histTo);
+    if (fromM != null || toM != null) {
+        const a = fromM != null ? fromM : 0, b = toM != null ? toM : 1440;
+        items = items.filter(h => {
+            const d = new Date(h.lastVisitTime || 0);
+            const mins = d.getHours() * 60 + d.getMinutes();
+            return a <= b ? (mins >= a && mins < b) : (mins >= a || mins < b);
+        });
+    }
     state.histShown = items;
 
     box.appendChild(sechead('calendar', `${items.length} page${items.length === 1 ? '' : 's'}`));
@@ -648,9 +728,11 @@ async function renderHist() {
     }
 
     const fmtTime = ts => new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    state.rowOrder = [];
     items.forEach(h => {
         const row = el('div', 'row' + (state.histSel.has(h.url) ? ' sel' : ''));
         const cb = el('input'); cb.type = 'checkbox'; cb.checked = state.histSel.has(h.url);
+        rangeSelectable(cb, state.rowOrder.push(h.url) - 1);
         cb.onchange = () => {
             if (cb.checked) state.histSel.add(h.url); else state.histSel.delete(h.url);
             row.classList.toggle('sel', cb.checked); renderActions();
@@ -719,6 +801,8 @@ async function openTabsGrouped(items, useWindow) {
             }
         } catch (e) { /* browser refused to group */ }
     }
+    await discardMade(made);
+
     if (grouped) toast(`Opened ${made.length} tabs in group “${r.text || 'group'}”`);
     else {
         // The set is still preserved as one unit: save it as a Tab Vault group.
@@ -785,6 +869,8 @@ async function renderSettings() {
         <input type="number" id="s-batch" min="1" max="50" value="${s.batchSize}"></div>
       <div class="field inline"><label>Batch delay (s)<span class="h">Pause between batches, max 20</span></label>
         <input type="number" id="s-delay" min="0" max="20" value="${s.batchDelaySec}"></div>
+      <div class="field inline"><label>Open restored tabs unloaded<span class="h">Tabs appear instantly but load only when you tap them — big restores (100+) stop choking the browser</span></label>
+        <input type="checkbox" id="s-unload" ${s.restoreUnloaded ? 'checked' : ''}></div>
 
       <div class="sechead alt">${svg('zap', 14)}<span class="st">Quick access</span><span class="rule"></span></div>
       <div class="field inline"><label>Open gesture<span class="h">Multi-finger gesture on any page. Avoid ones your phone grabs (3-finger-down is often screenshot).</span></label>
@@ -852,6 +938,7 @@ async function renderSettings() {
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
             captureClosed: $('#s-capture').checked,
+            restoreUnloaded: $('#s-unload').checked,
             gesture: $('#s-gesture').value,
             gestureTarget: $('#s-gtarget').value,
             gesture2: $('#s-gesture2').value,
@@ -1190,6 +1277,16 @@ async function saveGroup(g, tabs) {
     toast('Group saved'); render();
 }
 
+/* Unload freshly created background tabs so they only load when tapped.
+ * Runs AFTER any grouping — a discarded tab regroups less reliably. */
+async function discardMade(made) {
+    const s = await getSettings();
+    if (!s.restoreUnloaded || !chrome.tabs.discard) return;
+    for (const t of made) {
+        if (t && t.id != null && !t.active) { try { await chrome.tabs.discard(t.id); } catch (e) {} }
+    }
+}
+
 /* Restore a saved group: open its tabs, then re-group them under the name. */
 async function restoreGroup(sg) {
     const created = [];
@@ -1202,6 +1299,7 @@ async function restoreGroup(sg) {
             await chrome.tabGroups.update(gid, { title: sg.name, color: sg.color || 'blue' });
         } catch (e) { /* grouping unsupported — tabs are still open */ }
     }
+    await discardMade(created);
     toast(`Restored ${created.length} tabs`);
     render();
 }
@@ -1211,10 +1309,12 @@ async function reopenWindow(w) {
     const urls = w.tabs.map(t => t.url).filter(isRestorable);
     if (!urls.length) { toast('Nothing restorable in that window'); return; }
     try {
-        const first = urls.slice(0, 30);
+        const sset = await getSettings();
+        const unload = !!sset.restoreUnloaded && !!chrome.tabs.discard;
+        const first = urls.slice(0, unload ? 1 : 30);   // seeding 30 loads all 30 at once
         const win = await chrome.windows.create({ url: first });
         const made = (win.tabs || []).slice();
-        for (let i = 30; i < urls.length; i++) {
+        for (let i = first.length; i < urls.length; i++) {
             try { made.push(await chrome.tabs.create({ url: urls[i], windowId: win.id, active: false })); } catch (e) {}
         }
         if (state.groupsUsable) {
@@ -1234,6 +1334,7 @@ async function reopenWindow(w) {
                 } catch (e) {}
             }
         }
+        await discardMade(made);
         toast(`Reopened ${urls.length} tabs in a new window`);
     } catch (e) {
         toast('Could not open a window — restoring here instead');

@@ -89,6 +89,7 @@ nav button.on em:empty{display:none}
 .histbar select:focus,.histbar input:focus{outline:none;border-color:var(--sec)}
 .histbar input[type=date]{color-scheme:dark}
 .histbar input[type=number]{width:64px}
+.histbar .hlbl{font-size:11px;color:var(--muted);font-weight:700}
 
 /* --------------------------- section heads --------------------------- */
 .sechead{display:flex;align-items:center;gap:7px;margin:4px 0 10px;color:var(--sec)}
