@@ -47,6 +47,22 @@ window · ⭐ bookmark · 📋 copy URLs · ✕ close.
 
 Nothing is lost when a window closes — that's the whole point.
 
+Both lists have **checkboxes**: tick any mix of closed windows and closed tabs
+(or ☑ select-all in the top bar) and a bulk bar appears — reopen them all
+(batched), open them **as one tab group**, open in a new window, save as a
+session, copy the URLs, or forget them. This matters most on browsers like
+Quetta that report every tab as its own window: closing 66 tabs lands as 66
+one-tab "windows", and the bulk bar is how you take them all back in one tap.
+
+### History
+Search your **browsing history** and reopen any of it: filter by Today /
+Yesterday / last 7 or 30 days / a specific day / all time, search text, tick
+the pages you want, and open them together — batched, in a new window, or as
+one tab group. Uses an **optional permission**: nothing is requested (or read)
+until you tap *Grant history access* the first time. Where the browser refuses
+to create real groups, the selection is saved as a Tab Vault group instead, so
+the set is never lost.
+
 ### Saved
 Named sessions. Restore all at once or in batches, open in a new window,
 write to native bookmarks, export a `bookmarks.html`, or copy the URLs.

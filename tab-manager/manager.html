@@ -20,6 +20,7 @@
     <button class="on" data-sec="open"    data-ico="layers"><span class="ni"></span><span class="nl">Open <em id="c-open"></em></span></button>
     <button data-sec="groups"   data-ico="folder"><span class="ni"></span><span class="nl">Groups <em id="c-groups"></em></span></button>
     <button data-sec="closed"   data-ico="history"><span class="ni"></span><span class="nl">Closed <em id="c-closed"></em></span></button>
+    <button data-sec="hist"     data-ico="calendar"><span class="ni"></span><span class="nl">History</span></button>
     <button data-sec="saved"    data-ico="bookmark"><span class="ni"></span><span class="nl">Saved <em id="c-saved"></em></span></button>
     <button data-sec="settings" data-ico="sliders"><span class="ni"></span><span class="nl">Setup</span></button>
 </nav>
@@ -37,6 +38,7 @@
     <section id="sec-open" class="sec"></section>
     <section id="sec-groups" class="sec hidden"></section>
     <section id="sec-closed" class="sec hidden"></section>
+    <section id="sec-hist" class="sec hidden"></section>
     <section id="sec-saved" class="sec hidden"></section>
     <section id="sec-settings" class="sec hidden"></section>
 </main>
@@ -49,14 +51,7 @@
 
 <footer id="actions" class="hidden">
     <div class="selinfo"><span data-ico="check"></span><b id="selcount">0</b> selected</div>
-    <div class="btns">
-        <button class="btn p" data-act="session" data-ico="save">Save session</button>
-        <button class="btn v" data-act="group" data-ico="folderPlus">Group</button>
-        <button class="btn" data-act="window" data-ico="window">New window</button>
-        <button class="btn g" data-act="bookmark" data-ico="star">Bookmark</button>
-        <button class="btn" data-act="copy" data-ico="copy">Copy</button>
-        <button class="btn d" data-act="close" data-ico="x">Close</button>
-    </div>
+    <div class="btns" id="actbtns"></div>
 </footer>
 
 <div id="toast"></div>

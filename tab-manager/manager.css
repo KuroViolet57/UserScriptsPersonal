@@ -24,6 +24,7 @@ svg{display:block;flex:0 0 auto}
 body[data-sec="open"]{--sec:var(--blue)}
 body[data-sec="groups"]{--sec:var(--violet)}
 body[data-sec="closed"]{--sec:var(--amber)}
+body[data-sec="hist"]{--sec:var(--pink)}
 body[data-sec="saved"]{--sec:var(--emerald)}
 body[data-sec="settings"]{--sec:var(--cyan)}
 
@@ -52,6 +53,7 @@ nav button.on::after{background:currentColor}
 nav button[data-sec="open"].on{color:var(--blue)}
 nav button[data-sec="groups"].on{color:var(--violet)}
 nav button[data-sec="closed"].on{color:var(--amber)}
+nav button[data-sec="hist"].on{color:var(--pink)}
 nav button[data-sec="saved"].on{color:var(--emerald)}
 nav button[data-sec="settings"].on{color:var(--cyan)}
 nav em{font-style:normal;font-size:9.5px;font-weight:800;background:var(--bg4);color:var(--muted);
@@ -76,6 +78,17 @@ nav button.on em:empty{display:none}
 #main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .sec{padding:10px 11px 18px}
 .hidden{display:none !important}
+
+/* card / row selection checkboxes (Closed + History bulk select) */
+.ch input[type=checkbox],.row input[type=checkbox]{width:19px;height:19px;accent-color:var(--sec);flex:0 0 auto;margin:0}
+
+/* history filter bar */
+.histbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.histbar select,.histbar input{background:var(--bg3);border:1.5px solid var(--line);border-radius:10px;
+    color:var(--txt);padding:7px 9px;font-size:12.5px}
+.histbar select:focus,.histbar input:focus{outline:none;border-color:var(--sec)}
+.histbar input[type=date]{color-scheme:dark}
+.histbar input[type=number]{width:64px}
 
 /* --------------------------- section heads --------------------------- */
 .sechead{display:flex;align-items:center;gap:7px;margin:4px 0 10px;color:var(--sec)}
