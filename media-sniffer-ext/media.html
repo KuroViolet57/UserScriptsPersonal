@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media Vault</title>
+<link rel="stylesheet" href="media.css">
+<script src="popup-size.js"></script>
+</head>
+<body data-sec="tab">
+
+<header>
+    <span class="logo" data-ico="clap"></span>
+    <h1>Media Vault</h1>
+    <button class="icon" id="expand" data-ico="maximize" title="Open in a full tab"></button>
+    <button class="icon" id="refresh" data-ico="refresh" title="Refresh"></button>
+</header>
+
+<nav id="nav">
+    <button class="on" data-sec="tab" data-ico="film"><span class="ni"></span><span class="nl">This tab <em id="c-tab"></em></span></button>
+    <button data-sec="all" data-ico="layers"><span class="ni"></span><span class="nl">All tabs <em id="c-all"></em></span></button>
+    <button data-sec="settings" data-ico="sliders"><span class="ni"></span><span class="nl">Setup</span></button>
+</nav>
+
+<div id="filters">
+    <div class="searchwrap">
+        <span data-ico="search"></span>
+        <input id="search" type="search" placeholder="Search name or URL…">
+    </div>
+    <div class="selects">
+        <select id="f-type">
+            <option value="all">All types</option>
+            <option value="video">Video</option>
+            <option value="audio">Audio</option>
+            <option value="stream">Streams</option>
+        </select>
+        <select id="f-ext"><option value="all">All formats</option></select>
+        <select id="f-size">
+            <option value="0">Any size</option>
+            <option value="1048576">&gt; 1 MB</option>
+            <option value="5242880">&gt; 5 MB</option>
+            <option value="20971520">&gt; 20 MB</option>
+            <option value="104857600">&gt; 100 MB</option>
+        </select>
+    </div>
+</div>
+
+<main id="main">
+    <section id="sec-tab" class="sec"></section>
+    <section id="sec-all" class="sec hidden"></section>
+    <section id="sec-settings" class="sec hidden"></section>
+</main>
+
+<footer id="actions" class="hidden">
+    <div class="selinfo"><span data-ico="check"></span><b id="selcount">0</b> selected</div>
+    <div class="btns">
+        <button class="btn g" data-act="download" data-ico="download">Download</button>
+        <button class="btn" data-act="copy" data-ico="copy">Copy URLs</button>
+        <button class="btn d" data-act="remove" data-ico="trash">Remove</button>
+    </div>
+</footer>
+
+<div id="toast"></div>
+
+<script src="media.js"></script>
+</body>
+</html>
