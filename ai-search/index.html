@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Unfiltered AI Search</title>
+<style>
+    :root{
+        --bg:#0d0d12; --bg2:#15151d; --bg3:#1e1e28; --line:#2c2c38;
+        --txt:#e9e9f0; --muted:#9a9aa8; --accent:#7c5cff; --accent2:#a78bff;
+        --danger:#ff4d6d; --ok:#2ea043; --warn:#e0a33a;
+        --radius:14px;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{margin:0;height:100%}
+    body{background:var(--bg);color:var(--txt);
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+        display:flex;flex-direction:column;overflow:hidden}
+    button{font-family:inherit;cursor:pointer}
+    a{color:var(--accent2)}
+
+    /* ---------- Header ---------- */
+    header{display:flex;align-items:center;gap:10px;padding:12px 14px;
+        padding-top:calc(12px + env(safe-area-inset-top));
+        background:var(--bg2);border-bottom:1px solid var(--line);flex:0 0 auto}
+    header .logo{font-size:20px}
+    header h1{font-size:16px;margin:0;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    header .status{font-size:11px;color:var(--muted);font-weight:400}
+    .iconbtn{background:var(--bg3);border:1px solid var(--line);color:var(--txt);
+        width:40px;height:40px;border-radius:10px;font-size:18px;display:flex;align-items:center;justify-content:center}
+    .iconbtn:active{background:#2a2a36}
+
+    /* ---------- Chat area ---------- */
+    #chat{flex:1;overflow-y:auto;padding:16px 14px 8px;-webkit-overflow-scrolling:touch}
+    .msg{max-width:100%;margin-bottom:18px}
+    .msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px;font-weight:700}
+    .msg.user .bubble{background:var(--bg3);border:1px solid var(--line);border-radius:12px;padding:10px 13px;display:inline-block;max-width:100%}
+    .msg.ai .bubble{line-height:1.6;font-size:15px}
+    .bubble p{margin:0 0 10px} .bubble p:last-child{margin-bottom:0}
+    .bubble h1,.bubble h2,.bubble h3{margin:14px 0 8px;line-height:1.3}
+    .bubble h1{font-size:20px}.bubble h2{font-size:18px}.bubble h3{font-size:16px}
+    .bubble ul,.bubble ol{margin:0 0 10px;padding-left:22px}
+    .bubble li{margin-bottom:4px}
+    .bubble code{background:#000;padding:2px 6px;border-radius:5px;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace}
+    .bubble pre{background:#000;border:1px solid var(--line);border-radius:10px;padding:12px;overflow-x:auto;margin:0 0 10px}
+    .bubble pre code{background:none;padding:0}
+    .bubble a.cite{background:var(--accent);color:#fff;border-radius:5px;padding:0 6px;font-size:12px;
+        text-decoration:none;font-weight:700;margin:0 1px;vertical-align:top}
+    .sources{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+    .sources .stitle{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:8px;font-weight:700}
+    .source{display:flex;gap:8px;padding:8px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;margin-bottom:6px;text-decoration:none;color:var(--txt)}
+    .source .num{color:var(--accent2);font-weight:700;font-size:13px}
+    .source .sbody{min-width:0}
+    .source .sname{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .source .surl{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .thinking{display:inline-flex;gap:5px;align-items:center;color:var(--muted);font-size:13px}
+    .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:bl 1.2s infinite}
+    .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+    @keyframes bl{0%,60%,100%{opacity:.25}30%{opacity:1}}
+    .welcome{text-align:center;color:var(--muted);margin-top:12vh;padding:0 20px}
+    .welcome .big{font-size:40px;margin-bottom:10px}
+    .welcome h2{color:var(--txt);font-size:20px;margin:0 0 8px}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+    .chip{background:var(--bg3);border:1px solid var(--line);color:var(--txt);border-radius:20px;padding:8px 14px;font-size:13px}
+    .err{background:#3a1420;border:1px solid var(--danger);color:#ffc2ce;padding:10px 12px;border-radius:10px;font-size:13px}
+
+    /* ---------- Composer ---------- */
+    #composer{flex:0 0 auto;padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom));
+        background:var(--bg2);border-top:1px solid var(--line)}
+    .toolsrow{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+    .toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+        background:var(--bg3);border:1px solid var(--line);border-radius:18px;padding:6px 11px}
+    .toggle.on{color:#fff;background:var(--accent);border-color:var(--accent)}
+    .inputwrap{display:flex;gap:8px;align-items:flex-end}
+    #q{flex:1;background:var(--bg3);border:1px solid var(--line);color:var(--txt);border-radius:12px;
+        padding:12px;font-size:15px;resize:none;max-height:140px;line-height:1.4}
+    #q:focus{outline:none;border-color:var(--accent)}
+    #send{background:var(--accent);border:none;color:#fff;width:48px;height:48px;border-radius:12px;font-size:20px;flex:0 0 auto}
+    #send:disabled{opacity:.4}
+    #send.stop{background:var(--danger)}
+
+    /* ---------- Drawer / modal ---------- */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:none}
+    .overlay.show{display:block}
+    .drawer{position:fixed;top:0;right:0;height:100%;width:min(92vw,440px);background:var(--bg);
+        border-left:1px solid var(--line);z-index:60;transform:translateX(100%);transition:transform .25s;
+        display:flex;flex-direction:column}
+    .drawer.show{transform:translateX(0)}
+    .drawer header{background:var(--bg)}
+    .drawer .body{overflow-y:auto;padding:14px;flex:1}
+    .field{margin-bottom:16px}
+    .field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+    .field .hint{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4}
+    .field input,.field select,.field textarea{width:100%;background:var(--bg3);border:1px solid var(--line);
+        color:var(--txt);border-radius:10px;padding:11px;font-size:14px;font-family:inherit}
+    .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent)}
+    .field textarea{resize:vertical;min-height:90px;line-height:1.4}
+    .seg{display:flex;background:var(--bg3);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+    .seg button{flex:1;background:none;border:none;color:var(--muted);padding:11px 8px;font-size:13px;font-weight:600}
+    .seg button.on{background:var(--accent);color:#fff}
+    .row2{display:flex;gap:10px}.row2 .field{flex:1}
+    .savebar{padding:12px 14px;padding-bottom:calc(12px + env(safe-area-inset-bottom));
+        border-top:1px solid var(--line);display:flex;gap:10px;background:var(--bg2)}
+    .btn{flex:1;border:none;border-radius:10px;padding:13px;font-size:14px;font-weight:700}
+    .btn.primary{background:var(--accent);color:#fff}
+    .btn.ghost{background:var(--bg3);color:var(--txt);border:1px solid var(--line)}
+    .progress{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin-top:8px;display:none}
+    .progress.show{display:block}
+    .progress span{display:block;height:100%;background:var(--accent);width:0%;transition:width .2s}
+    .note{font-size:12px;color:var(--warn);background:#2a2213;border:1px solid #4a3a17;border-radius:8px;padding:9px 11px;margin-bottom:14px;line-height:1.45}
+
+    /* ---------- Age gate ---------- */
+    #gate{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
+    #gate .card{max-width:420px;text-align:center}
+    #gate .big{font-size:46px;margin-bottom:12px}
+    #gate h2{margin:0 0 12px}
+    #gate p{color:var(--muted);font-size:14px;line-height:1.55;margin:0 0 10px}
+    #gate .warn{color:#ffc2ce;background:#3a1420;border:1px solid var(--danger);border-radius:10px;padding:10px 12px;font-size:13px;margin:14px 0}
+    #gate .gbtns{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+</style>
+</head>
+<body>
+
+<!-- Age gate -->
+<div id="gate">
+    <div class="card">
+        <div class="big">🔞</div>
+        <h2>Adults only</h2>
+        <p>This is an unfiltered AI search &amp; chat front-end. It connects to a language model <b>you</b> provide (an API key, a local server, or a model downloaded into your browser). Content depends entirely on the model you choose.</p>
+        <div class="warn">By entering you confirm you are <b>18 or older</b> and that you will not use this tool to create, request, or seek sexual content involving minors or any other illegal material. Doing so is strictly prohibited.</div>
+        <div class="gbtns">
+            <button class="btn primary" id="gateEnter">I am 18+ and I agree — Enter</button>
+            <button class="btn ghost" id="gateLeave">Leave</button>
+        </div>
+    </div>
+</div>
+
+<!-- App -->
+<header>
+    <span class="logo">🔍</span>
+    <h1>Unfiltered AI Search <span class="status" id="status"></span></h1>
+    <button class="iconbtn" id="newChat" title="New chat">✎</button>
+    <button class="iconbtn" id="openSettings" title="Settings">⚙️</button>
+</header>
+
+<div id="chat">
+    <div class="welcome" id="welcome">
+        <div class="big">🔍</div>
+        <h2>Ask anything</h2>
+        <p>Unfiltered AI search powered by your own model.<br>Set up a backend in ⚙️ settings first.</p>
+        <div class="chips" id="chips"></div>
+    </div>
+</div>
+
+<div id="composer">
+    <div class="toolsrow">
+        <button class="toggle" id="tglSearch">🌐 Web search</button>
+        <span class="status" id="backendPill" style="margin-left:auto"></span>
+    </div>
+    <div class="inputwrap">
+        <textarea id="q" rows="1" placeholder="Search or ask…"></textarea>
+        <button id="send" title="Send">➤</button>
+    </div>
+</div>
+
+<!-- Settings drawer -->
+<div class="overlay" id="overlay"></div>
+<div class="drawer" id="drawer">
+    <header>
+        <h1 style="flex:1">⚙️ Settings</h1>
+        <button class="iconbtn" id="closeSettings">✕</button>
+    </header>
+    <div class="body">
+        <div class="note">Your keys and settings are stored only in this browser (localStorage). Nothing is sent anywhere except directly to the backend you configure.</div>
+
+        <div class="field">
+            <label>Backend</label>
+            <div class="seg" id="segBackend">
+                <button data-v="api" class="on">API key</button>
+                <button data-v="local">In-browser model</button>
+            </div>
+            <div class="hint">Use an API/local-server endpoint (recommended for large uncensored models) or download a small HuggingFace model into your browser.</div>
+        </div>
+
+        <!-- API mode -->
+        <div id="apiFields">
+            <div class="field">
+                <label>API base URL</label>
+                <input id="apiBase" placeholder="https://openrouter.ai/api/v1">
+                <div class="hint">OpenAI-compatible. Examples: OpenRouter <code>https://openrouter.ai/api/v1</code>, Ollama <code>http://localhost:11434/v1</code>, KoboldCpp <code>http://localhost:5001/v1</code>, text-generation-webui <code>http://localhost:5000/v1</code>.</div>
+            </div>
+            <div class="field">
+                <label>API key</label>
+                <input id="apiKey" type="password" placeholder="sk-… (leave blank for local servers)">
+            </div>
+            <div class="field">
+                <label>Model</label>
+                <input id="apiModel" list="modelSuggest" placeholder="model name / id">
+                <datalist id="modelSuggest">
+                    <option value="cognitivecomputations/dolphin-mixtral-8x7b">
+                    <option value="nousresearch/hermes-3-llama-3.1-70b">
+                    <option value="sao10k/l3-euryale-70b">
+                    <option value="gryphe/mythomax-l2-13b">
+                </datalist>
+                <div class="hint">On OpenRouter pick a permissive/uncensored model. For a local server, use its model name (e.g. the one Ollama has pulled).</div>
+            </div>
+        </div>
+
+        <!-- Local mode -->
+        <div id="localFields" style="display:none">
+            <div class="field">
+                <label>HuggingFace model (transformers.js / ONNX)</label>
+                <input id="localModel" placeholder="onnx-community/Llama-3.2-1B-Instruct-q4f16">
+                <div class="hint">Must be a <a href="https://huggingface.co/models?library=transformers.js" target="_blank" rel="noopener">transformers.js-compatible</a> model. Runs fully in your browser (downloaded &amp; cached on first use). Small models only on phones. Note: most large "uncensored" models are <b>not</b> ONNX — for those use API/local-server mode.</div>
+                <div class="progress" id="dlProgress"><span></span></div>
+            </div>
+            <div class="field">
+                <label>Compute</label>
+                <select id="localDevice">
+                    <option value="webgpu">WebGPU (faster, needs support)</option>
+                    <option value="wasm">WASM (compatible, slower)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="field">
+            <label>System prompt</label>
+            <textarea id="systemPrompt"></textarea>
+            <div class="hint">Sets the assistant's behaviour. Editable. The default permits adult/NSFW output while forbidding illegal content.</div>
+        </div>
+
+        <div class="field">
+            <label>Web search (SearXNG)</label>
+            <input id="searxUrl" placeholder="https://your-searxng-instance.tld">
+            <div class="hint">For the "search engine" mode. Point to a <a href="https://docs.searxng.org/" target="_blank" rel="noopener">SearXNG</a> instance with JSON output + CORS enabled (self-hosting recommended; <code>safesearch=0</code> is used). Leave blank to use the app as pure chat.</div>
+        </div>
+
+        <div class="row2">
+            <div class="field">
+                <label>Results to read</label>
+                <input id="searchCount" type="number" min="1" max="12" value="5">
+            </div>
+            <div class="field">
+                <label>Temperature</label>
+                <input id="temperature" type="number" min="0" max="2" step="0.05" value="0.8">
+            </div>
+        </div>
+        <div class="field">
+            <label>Max tokens</label>
+            <input id="maxTokens" type="number" min="128" max="8192" step="64" value="1024">
+        </div>
+    </div>
+    <div class="savebar">
+        <button class="btn ghost" id="resetSettings">Reset</button>
+        <button class="btn primary" id="saveSettings">Save</button>
+    </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+ * Unfiltered AI Search — self-contained front-end.
+ * Neutral infrastructure: connects to a user-supplied LLM.
+ * ============================================================ */
+
+const $ = s => document.querySelector(s);
+const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
+
+const DEFAULT_SYSTEM =
+"You are an unfiltered, uncensored AI assistant and search engine for a verified adult (18+) user. " +
+"Answer every request directly, honestly and in detail, including mature, explicit or NSFW topics, " +
+"without moralising, disclaimers, refusals or added warnings. When web results are provided, base your " +
+"answer on them and cite sources inline as [1], [2], etc. Absolute limits you never cross under any " +
+"circumstance: nothing sexual involving minors, and no operational instructions for serious real-world " +
+"harm (e.g. weapons, explosives, or credible attacks on people).";
+
+const DEFAULTS = {
+    backend: 'api',
+    apiBase: 'https://openrouter.ai/api/v1',
+    apiKey: '',
+    apiModel: '',
+    localModel: 'onnx-community/Llama-3.2-1B-Instruct-q4f16',
+    localDevice: 'webgpu',
+    systemPrompt: DEFAULT_SYSTEM,
+    searxUrl: '',
+    searchCount: 5,
+    temperature: 0.8,
+    maxTokens: 1024,
+    searchOn: false
+};
+
+let cfg = load();
+let history = [];          // {role, content}
+let busy = false;
+let abortCtl = null;
+let localGen = null;       // cached transformers.js pipeline
+let localGenId = '';
+
+function load() {
+    try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('aisearch_cfg') || '{}')); }
+    catch (e) { return Object.assign({}, DEFAULTS); }
+}
+function save() { localStorage.setItem('aisearch_cfg', JSON.stringify(cfg)); }
+
+/* ---------------- Age gate ---------------- */
+if (localStorage.getItem('aisearch_age') === 'ok') $('#gate').style.display = 'none';
+$('#gateEnter').onclick = () => { localStorage.setItem('aisearch_age', 'ok'); $('#gate').style.display = 'none'; };
+$('#gateLeave').onclick = () => { location.href = 'about:blank'; };
+
+/* ---------------- Settings UI ---------------- */
+function openSettings() { syncSettingsUI(); $('#overlay').classList.add('show'); $('#drawer').classList.add('show'); }
+function closeSettings() { $('#overlay').classList.remove('show'); $('#drawer').classList.remove('show'); }
+$('#openSettings').onclick = openSettings;
+$('#closeSettings').onclick = closeSettings;
+$('#overlay').onclick = closeSettings;
+
+function syncSettingsUI() {
+    $('#apiBase').value = cfg.apiBase;
+    $('#apiKey').value = cfg.apiKey;
+    $('#apiModel').value = cfg.apiModel;
+    $('#localModel').value = cfg.localModel;
+    $('#localDevice').value = cfg.localDevice;
+    $('#systemPrompt').value = cfg.systemPrompt;
+    $('#searxUrl').value = cfg.searxUrl;
+    $('#searchCount').value = cfg.searchCount;
+    $('#temperature').value = cfg.temperature;
+    $('#maxTokens').value = cfg.maxTokens;
+    setBackendSeg(cfg.backend);
+}
+function setBackendSeg(v) {
+    document.querySelectorAll('#segBackend button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+    $('#apiFields').style.display = v === 'api' ? '' : 'none';
+    $('#localFields').style.display = v === 'local' ? '' : 'none';
+}
+document.querySelectorAll('#segBackend button').forEach(b => b.onclick = () => setBackendSeg(b.dataset.v));
+
+$('#saveSettings').onclick = () => {
+    cfg.backend = document.querySelector('#segBackend button.on').dataset.v;
+    cfg.apiBase = $('#apiBase').value.trim() || DEFAULTS.apiBase;
+    cfg.apiKey = $('#apiKey').value.trim();
+    cfg.apiModel = $('#apiModel').value.trim();
+    cfg.localModel = $('#localModel').value.trim() || DEFAULTS.localModel;
+    cfg.localDevice = $('#localDevice').value;
+    cfg.systemPrompt = $('#systemPrompt').value;
+    cfg.searxUrl = $('#searxUrl').value.trim().replace(/\/+$/, '');
+    cfg.searchCount = clampNum($('#searchCount').value, 1, 12, 5);
+    cfg.temperature = clampNum($('#temperature').value, 0, 2, 0.8);
+    cfg.maxTokens = clampNum($('#maxTokens').value, 128, 8192, 1024);
+    save(); updateStatus(); closeSettings();
+};
+$('#resetSettings').onclick = () => {
+    if (!confirm('Reset all settings to defaults?')) return;
+    const age = localStorage.getItem('aisearch_age');
+    cfg = Object.assign({}, DEFAULTS); save(); syncSettingsUI(); updateStatus();
+};
+function clampNum(v, lo, hi, def) { v = parseFloat(v); if (isNaN(v)) return def; return Math.min(hi, Math.max(lo, v)); }
+
+/* ---------------- Web search toggle ---------------- */
+function refreshSearchToggle() {
+    $('#tglSearch').classList.toggle('on', cfg.searchOn);
+}
+$('#tglSearch').onclick = () => {
+    if (!cfg.searxUrl && !cfg.searchOn) { openSettings(); toast('Set a SearXNG URL to enable web search'); return; }
+    cfg.searchOn = !cfg.searchOn; save(); refreshSearchToggle();
+};
+
+function updateStatus() {
+    let s = '';
+    if (cfg.backend === 'api') s = cfg.apiModel ? (cfg.apiModel.split('/').pop()) : 'no model set';
+    else s = 'local: ' + (cfg.localModel.split('/').pop() || 'none');
+    $('#backendPill').textContent = (cfg.backend === 'api' ? '🔑 ' : '💻 ') + s;
+    refreshSearchToggle();
+}
+
+/* ---------------- Composer ---------------- */
+const qEl = $('#q');
+qEl.addEventListener('input', () => { qEl.style.height = 'auto'; qEl.style.height = Math.min(140, qEl.scrollHeight) + 'px'; });
+qEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !isMobile()) { e.preventDefault(); onSend(); }
+});
+$('#send').onclick = () => { if (busy) stopGen(); else onSend(); };
+$('#newChat').onclick = () => { if (busy) return; history = []; $('#chat').innerHTML = ''; renderWelcome(); };
+function isMobile() { return /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent); }
+
+/* ---------------- Chat rendering ---------------- */
+function renderWelcome() {
+    const w = el('div', 'welcome'); w.id = 'welcome';
+    w.innerHTML = '<div class="big">🔍</div><h2>Ask anything</h2>' +
+        '<p>Unfiltered AI search powered by your own model.<br>' +
+        (backendReady() ? 'Type a question below.' : 'Set up a backend in ⚙️ settings first.') + '</p>';
+    $('#chat').appendChild(w);
+}
+function backendReady() {
+    return cfg.backend === 'api' ? !!cfg.apiModel && (!!cfg.apiKey || /localhost|127\.0\.0\.1/.test(cfg.apiBase)) : !!cfg.localModel;
+}
+function clearWelcome() { const w = $('#welcome'); if (w) w.remove(); }
+
+function addUserMsg(text) {
+    clearWelcome();
+    const m = el('div', 'msg user');
+    m.innerHTML = '<div class="who">You</div>';
+    const b = el('div', 'bubble'); b.textContent = text; m.appendChild(b);
+    $('#chat').appendChild(m); scrollDown();
+}
+function addAiMsg() {
+    const m = el('div', 'msg ai');
+    m.innerHTML = '<div class="who">AI</div>';
+    const b = el('div', 'bubble');
+    b.innerHTML = '<span class="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>';
+    m.appendChild(b);
+    $('#chat').appendChild(m); scrollDown();
+    return { msg: m, bubble: b };
+}
+function scrollDown() { const c = $('#chat'); c.scrollTop = c.scrollHeight; }
+
+function showError(bubble, text) {
+    bubble.innerHTML = ''; const e = el('div', 'err'); e.textContent = '⚠️ ' + text; bubble.appendChild(e);
+}
+
+/* ---------------- Send flow ---------------- */
+async function onSend() {
+    const text = qEl.value.trim();
+    if (!text || busy) return;
+    if (!backendReady()) { openSettings(); toast('Configure a backend / model first'); return; }
+
+    qEl.value = ''; qEl.style.height = 'auto';
+    addUserMsg(text);
+    history.push({ role: 'user', content: text });
+
+    const { bubble } = addAiMsg();
+    setBusy(true);
+    abortCtl = new AbortController();
+
+    let sources = [];
+    try {
+        // Optional web search step
+        let searchBlock = '';
+        if (cfg.searchOn && cfg.searxUrl) {
+            bubble.innerHTML = '<span class="thinking">🌐 Searching the web…</span>';
+            try {
+                sources = await webSearch(text, cfg.searchCount, abortCtl.signal);
+                if (sources.length) searchBlock = buildSearchContext(sources);
+            } catch (e) {
+                sources = []; // search failed; continue as plain chat
+                toast('Search failed — answering without web results');
+            }
+        }
+
+        const messages = buildMessages(searchBlock);
+        bubble.innerHTML = '<span class="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>';
+
+        let acc = '';
+        const onToken = t => {
+            acc += t;
+            bubble.innerHTML = renderMarkdown(acc, sources);
+            scrollDown();
+        };
+
+        if (cfg.backend === 'api') await streamAPI(messages, onToken, abortCtl.signal);
+        else await runLocal(messages, onToken, abortCtl.signal);
+
+        if (!acc.trim()) { showError(bubble, 'Empty response from model.'); }
+        else {
+            bubble.innerHTML = renderMarkdown(acc, sources);
+            if (sources.length) bubble.appendChild(renderSources(sources));
+            history.push({ role: 'assistant', content: acc });
+        }
+    } catch (e) {
+        if (e && e.name === 'AbortError') {
+            const partial = bubble.textContent;
+            bubble.innerHTML = renderMarkdown(partial + '\n\n_(stopped)_', sources);
+        } else {
+            showError(bubble, (e && e.message) ? e.message : String(e));
+        }
+    } finally {
+        setBusy(false); abortCtl = null; scrollDown();
+    }
+}
+
+function setBusy(b) {
+    busy = b;
+    const s = $('#send');
+    s.classList.toggle('stop', b);
+    s.textContent = b ? '■' : '➤';
+    $('#status').textContent = b ? 'thinking…' : '';
+}
+function stopGen() { if (abortCtl) abortCtl.abort(); }
+
+function buildMessages(searchBlock) {
+    const msgs = [];
+    let sys = cfg.systemPrompt || DEFAULT_SYSTEM;
+    if (searchBlock) sys += '\n\n' + searchBlock;
+    msgs.push({ role: 'system', content: sys });
+    // include recent history (cap to keep context small)
+    const recent = history.slice(-12);
+    for (const h of recent) msgs.push(h);
+    return msgs;
+}
+
+/* ---------------- Web search (SearXNG JSON) ---------------- */
+async function webSearch(query, k, signal) {
+    const url = cfg.searxUrl + '/search?format=json&safesearch=0&q=' + encodeURIComponent(query);
+    const r = await fetch(url, { signal, headers: { 'Accept': 'application/json' } });
+    if (!r.ok) throw new Error('search HTTP ' + r.status);
+    const data = await r.json();
+    const list = (data.results || []).slice(0, k).map((x, i) => ({
+        n: i + 1, title: x.title || x.url, url: x.url, content: (x.content || '').slice(0, 500)
+    }));
+    return list;
+}
+function buildSearchContext(sources) {
+    let b = 'Web search results (cite as [n]):\n';
+    for (const s of sources) b += `[${s.n}] ${s.title}\nURL: ${s.url}\n${s.content}\n\n`;
+    return b.trim();
+}
+function renderSources(sources) {
+    const wrap = el('div', 'sources');
+    wrap.innerHTML = '<div class="stitle">Sources</div>';
+    for (const s of sources) {
+        const a = el('a', 'source'); a.href = s.url; a.target = '_blank'; a.rel = 'noopener';
+        a.innerHTML = `<span class="num">${s.n}</span><span class="sbody"><span class="sname"></span><span class="surl"></span></span>`;
+        a.querySelector('.sname').textContent = s.title;
+        a.querySelector('.surl').textContent = s.url;
+        wrap.appendChild(a);
+    }
+    return wrap;
+}
+
+/* ---------------- API backend (OpenAI-compatible, streaming) ---------------- */
+async function streamAPI(messages, onToken, signal) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (cfg.apiKey) headers['Authorization'] = 'Bearer ' + cfg.apiKey;
+    // OpenRouter niceties (harmless elsewhere)
+    if (/openrouter\.ai/.test(cfg.apiBase)) {
+        headers['HTTP-Referer'] = location.origin || 'https://localhost';
+        headers['X-Title'] = 'Unfiltered AI Search';
+    }
+    const body = {
+        model: cfg.apiModel,
+        messages,
+        temperature: cfg.temperature,
+        max_tokens: cfg.maxTokens,
+        stream: true
+    };
+    const res = await fetch(cfg.apiBase.replace(/\/+$/, '') + '/chat/completions', {
+        method: 'POST', headers, body: JSON.stringify(body), signal
+    });
+    if (!res.ok) {
+        let detail = '';
+        try { detail = (await res.json()).error?.message || ''; } catch (e) {}
+        throw new Error('API ' + res.status + (detail ? ': ' + detail : ' — check base URL / key / model'));
+    }
+    if (!res.body) { // no streaming support; fallback to full read
+        const j = await res.json(); onToken(j.choices?.[0]?.message?.content || ''); return;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+            let line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+            if (!line.startsWith('data:')) continue;
+            line = line.slice(5).trim();
+            if (line === '[DONE]') return;
+            try {
+                const j = JSON.parse(line);
+                const d = j.choices?.[0]?.delta?.content;
+                if (d) onToken(d);
+            } catch (e) { /* keep-alive / partial */ }
+        }
+    }
+}
+
+/* ---------------- Local backend (transformers.js) ---------------- */
+async function runLocal(messages, onToken, signal) {
+    const gen = await getLocalPipeline();
+    const { TextStreamer } = window.__tfjs;
+    const streamer = new TextStreamer(gen.tokenizer, {
+        skip_prompt: true,
+        skip_special_tokens: true,
+        callback_function: t => { if (signal.aborted) return; onToken(t); }
+    });
+    const stopOnAbort = () => {};
+    signal.addEventListener('abort', stopOnAbort);
+    const out = await gen(messages, {
+        max_new_tokens: cfg.maxTokens,
+        temperature: cfg.temperature,
+        do_sample: cfg.temperature > 0,
+        streamer
+    });
+    signal.removeEventListener('abort', stopOnAbort);
+    // If streamer didn't fire (older builds), emit final text.
+    if (out && !gen.__streamed) {
+        try {
+            const full = out[0].generated_text;
+            const last = Array.isArray(full) ? full[full.length - 1].content : full;
+            if (last) onToken(''); // no-op; streamer normally handles it
+        } catch (e) {}
+    }
+}
+
+async function getLocalPipeline() {
+    if (localGen && localGenId === cfg.localModel + '|' + cfg.localDevice) return localGen;
+    $('#status').textContent = 'loading model…';
+    const prog = $('#dlProgress'); const bar = prog.querySelector('span');
+    prog.classList.add('show');
+    if (!window.__tfjs) {
+        window.__tfjs = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3');
+    }
+    const { pipeline } = window.__tfjs;
+    const progress_callback = p => {
+        if (p.status === 'progress' && p.total) {
+            bar.style.width = Math.round(p.loaded / p.total * 100) + '%';
+            $('#status').textContent = 'downloading ' + (p.file || '').split('/').pop() + ' ' + Math.round(p.loaded / p.total * 100) + '%';
+        }
+    };
+    let gen;
+    try {
+        gen = await pipeline('text-generation', cfg.localModel, { device: cfg.localDevice, progress_callback });
+    } catch (e) {
+        if (cfg.localDevice === 'webgpu') {
+            $('#status').textContent = 'WebGPU failed, trying WASM…';
+            gen = await pipeline('text-generation', cfg.localModel, { device: 'wasm', progress_callback });
+        } else throw e;
+    }
+    prog.classList.remove('show'); bar.style.width = '0%';
+    $('#status').textContent = '';
+    localGen = gen; localGenId = cfg.localModel + '|' + cfg.localDevice;
+    return gen;
+}
+
+/* ---------------- Minimal Markdown renderer ---------------- */
+function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function renderMarkdown(src, sources) {
+    // code blocks first (protect them)
+    const blocks = [];
+    src = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+        blocks.push('<pre><code>' + escapeHtml(code.replace(/\n$/, '')) + '</code></pre>');
+        return ' B' + (blocks.length - 1) + ' ';
+    });
+    let html = escapeHtml(src);
+    // inline code
+    const inl = [];
+    html = html.replace(/`([^`]+)`/g, (m, c) => { inl.push('<code>' + c + '</code>'); return ' I' + (inl.length - 1) + ' '; });
+    // headings
+    html = html.replace(/^###\s?(.*)$/gm, '<h3>$1</h3>')
+               .replace(/^##\s?(.*)$/gm, '<h2>$1</h2>')
+               .replace(/^#\s?(.*)$/gm, '<h1>$1</h1>');
+    // bold / italic
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+               .replace(/(^|[^*])\*([^*]+)\*/g, '$1<i>$2</i>')
+               .replace(/__([^_]+)__/g, '<b>$1</b>');
+    // links
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // citations [n] -> link to source
+    if (sources && sources.length) {
+        html = html.replace(/\[(\d{1,2})\]/g, (m, n) => {
+            const s = sources.find(x => x.n === +n);
+            return s ? `<a class="cite" href="${s.url}" target="_blank" rel="noopener">${n}</a>` : m;
+        });
+    }
+    // lists
+    html = html.replace(/^(?:\s*)[-*]\s+(.*)$/gm, 'LI$1/LI');
+    html = html.replace(/(LI[\s\S]*?\/LI)(?!\s*LI)/g, m => '<ul>' + m + '</ul>');
+    html = html.replace(/LI/g, '<li>').replace(/\/LI/g, '</li>');
+    // paragraphs / breaks
+    html = html.split(/\n{2,}/).map(p => {
+        if (/^\s*<(h\d|ul|pre|ol)/.test(p)) return p;
+        return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+    }).join('');
+    // restore inline + blocks
+    html = html.replace(/ I(\d+) /g, (m, i) => inl[+i]);
+    html = html.replace(/ B(\d+) /g, (m, i) => blocks[+i]);
+    return html;
+}
+
+/* ---------------- Toast ---------------- */
+let toastT;
+function toast(msg) {
+    let t = document.querySelector('.__toast');
+    if (!t) { t = el('div', '__toast'); t.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:#2a2a36;color:#fff;padding:10px 16px;border-radius:22px;z-index:80;font-size:13px;max-width:88vw;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.5)'; document.body.appendChild(t); }
+    t.textContent = msg; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2600);
+}
+
+/* ---------------- Suggestion chips ---------------- */
+const SUGGESTIONS = ['Latest news on ', 'Explain ', 'Write a story about ', 'Compare ', 'How do I '];
+(function chips() {
+    const c = $('#chips');
+    SUGGESTIONS.forEach(s => {
+        const b = el('button', 'chip'); b.textContent = s.trim() + '…';
+        b.onclick = () => { qEl.value = s; qEl.focus(); };
+        c.appendChild(b);
+    });
+})();
+
+/* ---------------- init ---------------- */
+updateStatus();
+refreshSearchToggle();
+</script>
+</body>
+</html>
