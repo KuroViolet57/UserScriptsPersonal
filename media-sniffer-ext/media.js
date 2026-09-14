@@ -317,7 +317,16 @@ async function renderSettings() {
         <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}" style="width:70px"></div>
 
       <div class="field" style="margin-top:18px"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
-      <div class="field"><button class="btn d" id="s-clear" data-ico="trash" style="width:100%">Clear all detected media</button></div>`;
+      <div class="field"><button class="btn d" id="s-clear" data-ico="trash" style="width:100%">Clear all detected media</button></div>
+
+      <div class="tabhead" style="margin-top:18px">${svg('search', 13)}<span class="tt">DIAGNOSTICS</span><span class="rule"></span></div>
+      <div class="field">
+        <div style="display:flex;gap:6px">
+          <button class="btn" id="s-timing" data-ico="refresh" style="flex:1">Load timing</button>
+          <button class="btn" id="s-timingcopy" data-ico="copy" style="flex:0 0 auto"></button>
+        </div>
+        <pre id="s-diagout" class="diag" style="display:none"></pre>
+      </div>`;
     paintIcons(box);
     $('#s-corner').value = s.buttonCorner || 'tr';
     $('#s-gesture').value = s.gesture || 'tap3';
@@ -350,6 +359,22 @@ async function renderSettings() {
         await send({ type: 'clear', tabId: null });
         toast('Cleared'); render();
     };
+    const timingText = () => ['userAgent: ' + (navigator.userAgent || '').slice(0, 110)]
+        .concat(loadTimingReport(24)).join('\n');
+    $('#s-timing').onclick = () => {
+        const out = $('#s-diagout'); out.style.display = 'block'; out.textContent = timingText();
+    };
+    $('#s-timingcopy').onclick = () => {
+        const out = $('#s-diagout'); out.style.display = 'block';
+        const text = timingText(); out.textContent = text;
+        navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Copy failed'));
+    };
+}
+
+/* Load report from the shared boot watchdog in popup-size.js. */
+function loadTimingReport(pad) {
+    if (window.__bootReport) { try { return window.__bootReport(pad); } catch (e) {} }
+    return ['', '--- popup load (this page) ---', 'boot script (popup-size.js) did not run'];
 }
 
 /* ------------------------------ wiring ------------------------------ */
@@ -363,7 +388,10 @@ $('#f-size').addEventListener('change', e => { state.filter.minSize = +e.target.
 function saveFilter() { set('filter', state.filter); }
 
 $('#refresh').onclick = () => render();
-$('#expand').onclick = () => { chrome.tabs.create({ url: chrome.runtime.getURL('media.html') }); window.close(); };
+$('#expand').onclick = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('media.html') + '#' + state.section });
+    window.close();
+};
 
 function applyPopupSizeStyle(w, h) {
     let st = document.getElementById('popup-size-style');
@@ -400,6 +428,8 @@ function applyPopupSizeStyle(w, h) {
         if (tabs[0] && !(tabs[0].url || '').startsWith(self)) state.curTabId = tabs[0].id;
     } catch (e) {}
     if (state.curTabId == null) state.section = 'all';   // full-page mode
+    const h = location.hash.slice(1);                     // media.html#settings etc.
+    if (h === 'all' || h === 'settings' || (h === 'tab' && state.curTabId != null)) state.section = h;
     paintIcons();
-    render();
+    render().then(() => { if (window.__boot && !window.__boot.rendered) window.__boot.rendered = performance.now(); });
 })();

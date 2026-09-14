@@ -81,9 +81,15 @@ Named sessions. Restore all at once or in batches, open in a new window,
 write to native bookmarks, export a `bookmarks.html`, or copy the URLs.
 
 ### Settings
-Capture on/off, restore batch size + delay, how many closed windows/tabs to
-keep, a full JSON export, and a live report of whether the tab-groups API is
-available on your build.
+Capture on/off, restore batch size + delay, unloaded restores, how many closed
+windows/tabs to keep, a full JSON export/import (plus **Paste JSON** for when
+a file picker isn't an option), and diagnostics: whether the tab-groups API
+works on your build, the full API capability sweep, and a **popup load**
+report (per-file load times, failures, time to first render).
+
+On Android, tapping **Import** or **Export** in the *toolbar popup* opens the
+full-page manager on Setup first — the system file picker dismisses the popup,
+so import/export has to run from a real tab. (Paste JSON works anywhere.)
 
 ## Quick access (gesture & shortcuts)
 
@@ -152,6 +158,8 @@ Vivaldi uses desktop Chrome's extensions page: **Load unpacked** registers a
   and Load unpacked from there.
 - Every update: extract the new zip into the **same folder, overwriting**, then
   tap **Update** on `vivaldi://extensions`. Same ID, data intact, no reinstall.
+- A stale `manager.css` left in the folder from before v1.12 is harmless — the
+  styles now live inside `manager.html`.
 
 ## How closed-window capture works
 
@@ -191,3 +199,12 @@ That ordering is covered by tests in the repo's scratch harness.
   windows. The tab list is therefore built from `tabs.query({})` grouped by each
   tab's own `windowId`, which can't duplicate; diagnostics reports whether your
   build has this quirk (`populate duplicates`).
+- **Popup opens blank, unstyled, or very slowly** (seen on Vivaldi 8.2 with an
+  unpacked install): the browser re-reads the extension's files from the
+  folder on every open, and those reads can be slow or fail outright. The
+  stylesheet is inlined into the page (one file fewer per open, and an
+  unstyled popup can no longer happen), a spinner shows while the script
+  loads, and if the script fails to load a **Reload** banner appears instead
+  of a dead popup. ⚙ Setup → **Capabilities** prints a `popup load` block with
+  each file's load time. A Chrome Web Store install (even unlisted) lives in
+  the browser's own storage and avoids the per-open folder reads entirely.

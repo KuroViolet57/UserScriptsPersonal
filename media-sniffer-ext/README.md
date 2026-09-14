@@ -82,3 +82,9 @@ per-tab detections plus settings, so there is nothing precious to migrate.
 - `chrome.downloads` may be missing on some Android forks — the popup then falls
   back to opening the file in a tab so the browser's downloader can take it.
 - The detected-media store is capped per tab (default 300, configurable).
+- **Popup slow or blank on an unpacked install** (Vivaldi 8.2): the styles are
+  now inlined into `media.html` (one file fewer to read per open, never an
+  unstyled popup), a spinner shows while `media.js` loads, and a **Reload**
+  banner appears if it fails to load. Setup → Diagnostics → **Load timing**
+  prints per-file load times, failures and time to first render. A stale
+  `media.css` left in the folder is harmless.

@@ -6,6 +6,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p dist
 
+# popup-size.js is shared verbatim by both extensions (boot watchdog + popup
+# sizing); refuse to ship if the copies ever drift apart.
+cmp -s tab-manager/popup-size.js media-sniffer-ext/popup-size.js \
+    || { echo "popup-size.js differs between tab-manager/ and media-sniffer-ext/" >&2; exit 1; }
+
 build() {
     local dir="$1" out="$2"
     rm -f "dist/$out"

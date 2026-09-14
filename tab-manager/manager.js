@@ -105,8 +105,22 @@ function set(key, val) { return new Promise(r => chrome.storage.local.set({ [key
 async function getSettings() { return Object.assign({}, DEFAULT_SETTINGS, await get(K.SETTINGS, {})); }
 function send(msg) { return new Promise(r => chrome.runtime.sendMessage(msg, resp => { void chrome.runtime.lastError; r(resp || {}); })); }
 
+/* True only for the toolbar popup window: top-level and not a real tab.
+ * (The full-page manager is a tab; the bottom sheet is an iframe.) */
+async function isPopupContext() {
+    if (window.self !== window.top) return false;
+    try {
+        const cur = await new Promise(r => chrome.tabs.getCurrent(t => { void chrome.runtime.lastError; r(t); }));
+        return !cur;
+    } catch (e) { return false; }
+}
+const SECTIONS = ['open', 'groups', 'closed', 'hist', 'saved', 'settings'];
+
 let state = {
-    section: 'open', query: '', windows: [], groups: [],
+    section: (SECTIONS.includes(location.hash.slice(1)) ? location.hash.slice(1)
+        : location.hash === '#backup' ? 'settings' : 'open'),
+    scrollToBackup: location.hash === '#backup',
+    query: '', windows: [], groups: [],
     selected: new Set(),            // open-tab ids (numbers)
     closedSel: new Set(),           // closed-window ids ('w…') + closed-tab ids ('t…')
     histSel: new Set(),             // history item URLs
@@ -171,6 +185,28 @@ function askText(title, initial, extra) {
         m.addEventListener('click', e => { if (e.target === m) done(null); });
         document.body.appendChild(m);
         setTimeout(() => input.focus(), 50);
+    });
+}
+
+/* Multi-line text modal (pasting an exported JSON). */
+function askTextarea(title, placeholder) {
+    return new Promise(resolve => {
+        const m = el('div', 'modal');
+        m.innerHTML = `<div class="mp"><h3></h3><div class="mb">
+            <textarea id="_at" spellcheck="false"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <button class="btn" id="_ac" style="flex:1">Cancel</button>
+              <button class="btn p" id="_ao" style="flex:1">Import</button>
+            </div></div></div>`;
+        m.querySelector('h3').textContent = title;
+        const ta = m.querySelector('#_at');
+        ta.placeholder = placeholder || '';
+        const done = v => { m.remove(); resolve(v); };
+        m.querySelector('#_ac').onclick = () => done(null);
+        m.querySelector('#_ao').onclick = () => done(ta.value.trim());
+        m.addEventListener('click', e => { if (e.target === m) done(null); });
+        document.body.appendChild(m);
+        setTimeout(() => ta.focus(), 50);
     });
 }
 
@@ -313,6 +349,7 @@ async function render() {
     const s = state.section;
     if (state.prevSection !== s) { state.lastSelIdx = -1; state.prevSection = s; }
     document.body.dataset.sec = s;
+    const bootEl = document.querySelector('#main .boot'); if (bootEl) bootEl.remove();
     document.querySelectorAll('.sec').forEach(x => x.classList.add('hidden'));
     $('#sec-' + s).classList.remove('hidden');
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.sec === s));
@@ -327,6 +364,7 @@ async function render() {
 
     await renderCounts();
     renderActions();
+    if (window.__boot && !window.__boot.rendered) window.__boot.rendered = performance.now();
 }
 
 async function renderCounts() {
@@ -853,6 +891,7 @@ async function renderSaved() {
 
 async function renderSettings() {
     const s = await getSettings();
+    const inPopup = await isPopupContext();   // Android dismisses the popup when a file picker opens
     const cw = await get(K.CLOSED_WINDOWS, []), ct = await get(K.CLOSED_TABS, []);
     const box = $('#sec-settings');
     box.innerHTML = `
@@ -911,9 +950,11 @@ async function renderSettings() {
 
       <div class="sechead alt">${svg('save', 14)}<span class="st">Your data</span><span class="rule"></span></div>
       <div class="field"><button class="btn" id="s-export" data-ico="download" style="width:100%">Export all data (JSON)</button></div>
-      <div class="field"><button class="btn" id="s-import" data-ico="restore" style="width:100%">Import data (JSON)</button>
+      <div class="field"><div style="display:flex;gap:6px">
+          <button class="btn" id="s-import" data-ico="restore" style="flex:1">Import data (JSON)</button>
+          <button class="btn" id="s-paste" data-ico="edit" style="flex:0 0 auto">Paste JSON</button></div>
         <input type="file" id="s-importfile" accept=".json,application/json" style="display:none">
-        <div class="h">Import merges a previous export — nothing overwritten, duplicates skipped.</div></div>
+        <div class="h">Import merges a previous export — nothing overwritten, duplicates skipped. From the toolbar popup, Import/Export open the full-page manager (Android closes the popup when the file picker opens); Paste JSON works anywhere.</div></div>
       <div class="field"><button class="btn d" id="s-clearclosed" data-ico="trash" style="width:100%">Clear closed history</button></div>
 
       <div class="sechead alt">${svg('search', 14)}<span class="st">Diagnostics</span><span class="rule"></span></div>
@@ -958,7 +999,22 @@ async function renderSettings() {
         } catch (e) {}
         toast('Settings saved');
     };
-    $('#s-import').onclick = () => $('#s-importfile').click();
+    $('#s-import').onclick = () => {
+        if (inPopup) return openFullPage('backup');
+        $('#s-importfile').click();
+    };
+    $('#s-paste').onclick = async () => {
+        const text = await askTextarea('Paste an exported JSON', '{ "sessions": [ … ], "savedGroups": [ … ] }');
+        if (!text) return;
+        try {
+            const merged = await importData(JSON.parse(text));
+            toast(`Imported: ${merged.sessions} sessions, ${merged.savedGroups} groups, ` +
+                  `${merged.closedWindows} windows, ${merged.closedTabs} tabs`);
+            render();
+        } catch (err) {
+            toast('Import failed: ' + ((err && err.message) || 'not a valid export'));
+        }
+    };
     $('#s-importfile').addEventListener('change', async e => {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
@@ -974,6 +1030,7 @@ async function renderSettings() {
         e.target.value = '';
     });
     $('#s-export').onclick = async () => {
+        if (inPopup) return openFullPage('backup');
         const data = {
             exportedAt: new Date().toISOString(),
             sessions: await get(K.SESSIONS, []),
@@ -1005,6 +1062,13 @@ async function renderSettings() {
         out.style.display = 'block'; out.textContent = text;
         navigator.clipboard.writeText(text).then(() => toast('Diagnostics copied'), () => toast('Copy failed'));
     };
+    if (state.scrollToBackup) {
+        state.scrollToBackup = false;
+        setTimeout(() => {
+            const b = $('#s-export'); if (b) b.scrollIntoView({ block: 'center' });
+            toast('Import / Export work from this page');
+        }, 80);
+    }
 }
 
 /* Full sweep of what this browser exposes to THIS extension: presence of the
@@ -1081,7 +1145,14 @@ async function probeCapabilities() {
             chrome.permissions.contains({ permissions: ['history'] }, ok => { void chrome.runtime.lastError; r(!!ok); }));
         add('optional "history" granted', String(hasHist));
     }
+    L.push(...loadTimingReport(32));
     return L.join('\n');
+}
+
+/* Load report from the shared boot watchdog in popup-size.js. */
+function loadTimingReport(pad) {
+    if (window.__bootReport) { try { return window.__bootReport(pad); } catch (e) {} }
+    return ['', '--- popup load (this page) ---', 'boot script (popup-size.js) did not run'];
 }
 
 /* Merge a previous "Export all data" JSON into the current install.
@@ -1185,6 +1256,7 @@ async function runDiagnostics() {
 
     add('group source used', state.groupSource || 'none');
     if (state.groupError) add('group load error', state.groupError);
+    L.push(...loadTimingReport(26));
     return L.join('\n');
 }
 
@@ -1495,10 +1567,11 @@ $('#selnone').onclick = () => {
     else { renderOpen(); renderActions(); }
 };
 $('#refresh').onclick = () => { send({ type: 'rebuild' }); render(); };
-$('#expand').onclick = () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') });
+function openFullPage(section) {
+    chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + '#' + (section || state.section) });
     window.close();
-};
+}
+$('#expand').onclick = () => openFullPage(state.section);
 $('#jobcancel').onclick = async () => {
     await send({ type: 'cancelOpen' });
     clearInterval(jobTimer); $('#jobbar').classList.add('hidden'); toast('Restore cancelled');
@@ -1519,8 +1592,7 @@ function applyPopupSizeStyle(w, h) {
 (async () => {
     if (window.self !== window.top) return;    // iframe sheet: fluid, no style
     try {
-        const cur = await new Promise(r => chrome.tabs.getCurrent(t => { void chrome.runtime.lastError; r(t); }));
-        if (cur) { applyPopupSizeStyle(0, 0); return; }        // full-page tab
+        if (!await isPopupContext()) { applyPopupSizeStyle(0, 0); return; }   // full-page tab
         window.__isPopup = true;
         const s = await getSettings();
         try { localStorage.setItem('popupW', s.popupW || 0); localStorage.setItem('popupH', s.popupH || 0); } catch (e) {}
