@@ -71,8 +71,11 @@ Yesterday / last 7 or 30 days / a specific day / all time, search text, and
 narrow to a **time-of-day window** ("between … and …" — leave *between* empty
 for "before 07:00"; a window crossing midnight wraps correctly). Tick the
 pages you want and open them together — batched, in a new window, or as one
-tab group. Uses an **optional permission**: nothing is requested (or read)
-until you tap *Grant history access* the first time. Where the browser refuses
+tab group. The `history` permission is part of the extension (granted when
+it is loaded — nothing is read until you open the History tab). It used to be
+requested at runtime, but that prompt never appears on Vivaldi Android
+because it dismisses the toolbar popup; an install that still lacks it just
+needs a reload (**Update** on the extensions page). Where the browser refuses
 to create real groups, the selection is saved as a Tab Vault group instead, so
 the set is never lost.
 

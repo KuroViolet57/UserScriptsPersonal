@@ -678,14 +678,30 @@ async function renderHist() {
         chrome.permissions.contains({ permissions: ['history'] }, ok => { void chrome.runtime.lastError; r(!!ok); });
     });
     if (!granted || !chrome.history || !chrome.history.search) {
+        // Since 1.12.1 `history` is a normal manifest permission, granted when
+        // the extension is (re)loaded — the runtime prompt never showed on
+        // Vivaldi Android (it dismisses the popup, like the file picker). This
+        // card is the fallback for an install that hasn't been reloaded yet.
+        const inPopup = await isPopupContext();
         const c = el('div', 'card');
         c.innerHTML = `<div class="ch"><span class="ci">${svg('key', 15)}</span><span class="ct">Browsing history</span></div>
-            <div class="cm">Reopening pages from history needs a one-time permission — nothing is read until you ask for it here.</div>`;
+            <div class="cm">${!granted
+                ? 'The <b>history</b> permission isn’t granted on this install yet. It is part of the extension since v1.12.1, so <b>reloading it</b> (Update on the extensions page, or reinstalling the zip) grants it with no prompt at all.' +
+                  (inPopup ? ' Asking for it from the toolbar popup can’t work on Android — the prompt closes the popup — so the button below opens the full page first.'
+                           : ' You can also ask for it here.')
+                : 'This browser doesn’t expose the history API to extensions, so this section can’t work here.'}</div>`;
         const cb = el('div', 'cb');
-        cb.appendChild(mk('Grant history access', () => {
+        if (!granted) cb.appendChild(mk('Grant history access', () => {
+            if (inPopup) return openFullPage('hist');
             if (!chrome.permissions || !chrome.permissions.request) { toast('This browser cannot grant permissions at runtime'); return; }
+            let answered = false;
+            const watchdog = setTimeout(() => {
+                if (!answered) toast('No permission prompt appeared — reload the extension (Update) to grant it instead');
+            }, 3000);
             chrome.permissions.request({ permissions: ['history'] }, ok => {
-                void chrome.runtime.lastError;
+                answered = true; clearTimeout(watchdog);
+                const err = chrome.runtime.lastError;
+                if (err) { toast('Permission request failed: ' + (err.message || err)); return; }
                 if (!ok) { toast('Permission not granted'); return; }
                 if (!chrome.history) { toast('Granted — reopen Tab Vault to activate'); return; }
                 render();
@@ -1143,7 +1159,7 @@ async function probeCapabilities() {
     if (chrome.permissions && chrome.permissions.contains) {
         const hasHist = await new Promise(r =>
             chrome.permissions.contains({ permissions: ['history'] }, ok => { void chrome.runtime.lastError; r(!!ok); }));
-        add('optional "history" granted', String(hasHist));
+        add('"history" permission granted', String(hasHist));
     }
     L.push(...loadTimingReport(32));
     return L.join('\n');
