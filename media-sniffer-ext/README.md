@@ -34,8 +34,10 @@ Referer/CORS tricks needed.
   size/corner/min-size configurable — opening an in-page panel with **preview
   player**, Download, **Open in external player** (Android `intent:`, package
   configurable), Copy. `blob:`/MSE sources are listed and previewable there.
-- **Setup** (cyan): button options, external player package, segment folding,
-  min-size ignore threshold, per-tab cap.
+- **Setup** (cyan): button options, **Downloads → Download with** (browser
+  downloader · 1DM+ · 1DM · 1DM Lite · ADM · ADM Pro · app chooser · custom
+  package), external player presets (VLC, MX Player, Just Player, mpv, custom),
+  segment folding, min-size ignore threshold, per-tab cap.
 
 ## Quick access
 
@@ -88,3 +90,13 @@ per-tab detections plus settings, so there is nothing precious to migrate.
   banner appears if it fails to load. Setup → Diagnostics → **Load timing**
   prints per-file load times, failures and time to first render. A stale
   `media.css` left in the folder is harmless.
+- **Downloads: browser vs apps.** "Browser downloader" uses the browser's own
+  download manager. Any app choice hands the *direct* link to that app through
+  an Android `intent:` (broad `video/*` / `audio/*` type — exact codec MIMEs
+  resolve to nothing on real devices). Android only lets a page launch an app
+  from a tap, so: from the on-video panel and the bottom sheet the page does
+  it directly; from the toolbar popup the page is asked to launch it, and if
+  the page can't (internal pages, the full-page manager) a tap-to-open link
+  appears. The link is also copied to the clipboard first (toggle in Setup) —
+  1DM and ADM watch the clipboard and offer the download on their own. Bulk
+  downloads to an app copy all links and hand over the first one.

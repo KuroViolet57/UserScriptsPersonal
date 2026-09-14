@@ -20,6 +20,9 @@ const DEFAULT_SETTINGS = {
     buttonCorner: 'tr',      // tl tr bl br
     minVideoPx: 120,
     playerPackage: '',       // android package for "open in player" ('' = chooser)
+    downloadMethod: 'browser', // browser | 1dmplus | 1dm | 1dmlite | adm | admpro | chooser | custom
+    downloadPackage: '',     // android package when downloadMethod = custom
+    copyOnSend: true,        // also copy the link when handing it to an app
     collapseSegments: true,  // fold repeated .ts/.m4s segment URLs into one entry
     maxPerTab: 300,
     minSniffBytes: 0,        // ignore network media smaller than this (0 = keep all)
@@ -305,6 +308,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     }
                 } else {
                     sendResponse({ ok: false, error: 'downloads API unavailable', fallback: true });
+                }
+            } else if (msg.type === 'openIntent') {
+                // The popup / full page can't launch an Android app itself:
+                // ask the page's content script to navigate to the intent: URL.
+                try {
+                    if (msg.tabId == null) throw new Error('no page tab');
+                    const r = await chrome.tabs.sendMessage(msg.tabId, { type: 'openIntent', intent: msg.intent });
+                    sendResponse(r && r.ok ? { ok: true } : { ok: false, error: 'page did not accept' });
+                } catch (e) {
+                    sendResponse({ ok: false, error: String((e && e.message) || e) });
                 }
             } else if (msg.type === 'clear') {
                 if (msg.tabId != null) delete media[msg.tabId];

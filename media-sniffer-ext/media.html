@@ -171,6 +171,13 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
 pre.diag{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px;
     margin-top:9px;font-size:10.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;
     max-height:260px;overflow:auto;color:var(--muted)}
+/* modal (tap-to-open link when the page can't launch an app) */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.68);display:flex;align-items:center;justify-content:center;padding:18px;z-index:60;backdrop-filter:blur(3px)}
+.modal .mp{background:var(--bg2,var(--bg3));border:1px solid var(--line2);border-radius:16px;width:100%;max-width:340px;padding:17px;box-shadow:0 16px 50px rgba(0,0,0,.6)}
+.modal h3{margin:0 0 13px;font-size:15.5px}
+.modal .mb{display:flex;flex-direction:column;gap:10px}
+.modal .h{font-size:12px;color:var(--muted);line-height:1.45}
+a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 </style>
 <script src="popup-size.js"></script>
 </head>

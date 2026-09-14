@@ -14,8 +14,38 @@
 
     let settings = {
         buttonOn: true, buttonSize: 44, buttonCorner: 'tr',
-        minVideoPx: 120, playerPackage: '', gesture: 'tap3', gestureTarget: 'sheet'
+        minVideoPx: 120, playerPackage: '', gesture: 'tap3', gestureTarget: 'sheet',
+        downloadMethod: 'browser', downloadPackage: '', copyOnSend: true
     };
+    const DL_APPS = {
+        '1dmplus': ['1DM+', 'idm.internet.download.manager.plus'],
+        '1dm':     ['1DM', 'idm.internet.download.manager'],
+        '1dmlite': ['1DM Lite', 'idm.internet.download.manager.adm.lite'],
+        'adm':     ['ADM', 'com.dv.adm'],
+        'admpro':  ['ADM Pro', 'com.dv.adm.pay'],
+        'chooser': ['App chooser', ''],
+        'custom':  ['Custom app', null]           // -> settings.downloadPackage
+    };
+    /* {label, pkg}: pkg === null means the browser's own downloader. */
+    function resolveDl(s) {
+        const m = DL_APPS[s.downloadMethod];
+        if (!m) return { label: 'Download', pkg: null };
+        if (s.downloadMethod === 'custom') {
+            const pkg = (s.downloadPackage || '').trim();
+            return pkg ? { label: pkg.split('.').pop(), pkg } : { label: 'Download', pkg: null };
+        }
+        return { label: m[0], pkg: m[1] };
+    }
+    /* Android VIEW intent. Broad type (video/* / audio/*) is what actually
+     * resolves on real devices; an exact codec MIME often matches nothing. */
+    function buildIntent(url, pkg, kind, title) {
+        let it = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
+        it += 'type=' + encodeURIComponent(kind === 'audio' ? 'audio/*' : 'video/*') + ';';
+        if (pkg) it += 'package=' + pkg + ';';
+        if (title) it += 'S.title=' + encodeURIComponent(String(title).slice(0, 120)) + ';';
+        return it + 'end';
+    }
+    function dlLabel() { const d = resolveDl(settings); return d.pkg === null ? 'Download' : d.label; }
 
     function send(msg) {
         return new Promise(res => {
@@ -143,12 +173,6 @@
         while (n >= 1024 && i < 3) { n /= 1024; i++; }
         return (i ? n.toFixed(n < 10 ? 1 : 0) : n) + ' ' + u[i];
     }
-    function buildIntent(url, pkg, kind) {
-        let it = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
-        it += 'type=' + encodeURIComponent(kind === 'audio' ? 'audio/*' : 'video/*') + ';';
-        if (pkg) it += 'package=' + pkg + ';';
-        return it + 'end';
-    }
     function copy(text) {
         (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
             .then(() => toast('Link copied'), () => {
@@ -161,6 +185,19 @@
             });
     }
     async function download(item) {
+        const dl = resolveDl(settings);
+        if (dl.pkg !== null) {
+            // Hand the direct link to the chosen app (1DM, ADM, chooser…). The
+            // tap that got us here is the user activation Android requires.
+            if (settings.copyOnSend !== false) {
+                try { await navigator.clipboard.writeText(item.url); } catch (e) {}
+            }
+            try {
+                location.href = buildIntent(item.url, dl.pkg, item.kind, item.name);
+                toast('Sent to ' + dl.label + (settings.copyOnSend !== false ? ' · link copied' : ''));
+                return;
+            } catch (e) { toast('Could not open ' + dl.label + ' — using the browser'); }
+        }
         const r = await send({ type: 'download', url: item.url, filename: item.name });
         if (r.ok) { toast('Download started'); return; }
         // fallback: plain anchor (same-origin/blob) — best effort
@@ -226,7 +263,7 @@
                 </div>
                 <div class="mv-acts">
                     <button class="mv-a p" data-a="play">▶ Preview</button>
-                    <button class="mv-a g" data-a="dl">⬇ Download</button>
+                    <button class="mv-a g" data-a="dl">⬇ ${dlLabel()}</button>
                     <button class="mv-a" data-a="ext">↗ Player</button>
                     <button class="mv-a" data-a="copy">⧉ Copy</button>
                 </div>`;
@@ -254,7 +291,7 @@
             });
             row.querySelector('[data-a="ext"]').addEventListener('click', () => {
                 if (item.blob) { toast('blob: streams can only be watched in-page'); return; }
-                location.href = buildIntent(item.url, settings.playerPackage, item.kind);
+                location.href = buildIntent(item.url, settings.playerPackage, item.kind, item.name);
             });
             row.querySelector('[data-a="copy"]').addEventListener('click', () => copy(item.url));
             list.appendChild(row);
@@ -440,5 +477,21 @@
     // popup asks us to open the overlay ("show on page")
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg && msg.type === 'openOverlay') { openOverlay2(null); sendResponse({ ok: true }); }
+        else if (msg && msg.type === 'openIntent' && /^intent:/.test(msg.intent || '')) {
+            // relay from the toolbar popup / full page (may still be blocked
+            // by Android without a tap on this page — the link is on the clipboard)
+            try { location.href = msg.intent; sendResponse({ ok: true }); }
+            catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
+        }
+    });
+
+    // The bottom-sheet iframe (our own origin) asks the page to launch an app.
+    // The tap inside the iframe also activated this frame, which Android needs.
+    window.addEventListener('message', e => {
+        let ours = '';
+        try { ours = chrome.runtime.getURL('').replace(/\/$/, ''); } catch (err) {}
+        if (!ours || e.origin !== ours) return;
+        const d = e.data;
+        if (d && d.type === 'mv-intent' && /^intent:/.test(d.intent || '')) location.href = d.intent;
     });
 })();

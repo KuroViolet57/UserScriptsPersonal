@@ -6,6 +6,46 @@
 const $ = s => document.querySelector(s);
 const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
 
+/* ---------------------------- downloader apps ---------------------------- */
+const DL_APPS = {
+    '1dmplus': ['1DM+', 'idm.internet.download.manager.plus'],
+    '1dm':     ['1DM', 'idm.internet.download.manager'],
+    '1dmlite': ['1DM Lite', 'idm.internet.download.manager.adm.lite'],
+    'adm':     ['ADM', 'com.dv.adm'],
+    'admpro':  ['ADM Pro', 'com.dv.adm.pay'],
+    'chooser': ['App chooser', ''],
+    'custom':  ['Custom app', null]           // -> settings.downloadPackage
+};
+/* {label, pkg}: pkg === null means the browser's own downloader. */
+function resolveDl(s) {
+    const m = DL_APPS[s.downloadMethod];
+    if (!m) return { label: 'Download', pkg: null };
+    if (s.downloadMethod === 'custom') {
+        const pkg = (s.downloadPackage || '').trim();
+        return pkg ? { label: pkg.split('.').pop(), pkg } : { label: 'Download', pkg: null };
+    }
+    return { label: m[0], pkg: m[1] };
+}
+/* Android VIEW intent. Broad type (video/* / audio/*) is what actually
+ * resolves on real devices; an exact codec MIME often matches nothing. */
+function buildIntent(url, pkg, kind, title) {
+    let it = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
+    it += 'type=' + encodeURIComponent(kind === 'audio' ? 'audio/*' : 'video/*') + ';';
+    if (pkg) it += 'package=' + pkg + ';';
+    if (title) it += 'S.title=' + encodeURIComponent(String(title).slice(0, 120)) + ';';
+    return it + 'end';
+}
+const PLAYERS = {
+    vlc: 'org.videolan.vlc', mx: 'com.mxtech.videoplayer.ad', mxpro: 'com.mxtech.videoplayer.pro',
+    just: 'com.brouken.player', mpv: 'is.xyz.mpv'
+};
+let appSettings = {};
+async function loadSettings() {
+    const r = await send({ type: 'getSettings' });
+    appSettings = (r.ok && r.settings) || {};
+}
+function dlButtonLabel() { const d = resolveDl(appSettings); return d.pkg === null ? 'Download' : d.label; }
+
 const ICON = {
     clap:     '<path d="M4 11h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="m4 11-1.5-4.5 15.2-5 1.5 4.5z"/><path d="m7.6 9 2.2-4.6M12.4 7.4l2.2-4.6"/>',
     film:     '<rect x="2" y="2" width="20" height="20" rx="2.2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/>',
@@ -101,6 +141,7 @@ async function loadItems() {
 
 /* ------------------------------ render ------------------------------ */
 async function render() {
+    await loadSettings();
     const s = state.section;
     document.body.dataset.sec = s;
     document.querySelectorAll('.sec').forEach(x => x.classList.add('hidden'));
@@ -195,7 +236,7 @@ function mediaRow(it) {
 
     const acts = el('div', 'acts');
     if (!it.blob) {
-        acts.appendChild(ab('Download', 'download', 'g', () => downloadOne(it)));
+        acts.appendChild(ab(dlButtonLabel(), 'download', 'g', () => downloadOne(it)));
         acts.appendChild(ab('Copy', 'copy', '', () => copyText(it.url, 'Link copied')));
         acts.appendChild(ab('Open', 'external', '', () => chrome.tabs.create({ url: it.url })));
     } else {
@@ -225,6 +266,8 @@ function ab(label, icon, cls, fn) {
 
 /* ------------------------------ actions ------------------------------ */
 async function downloadOne(it) {
+    const dl = resolveDl(appSettings);
+    if (dl.pkg !== null) return sendToApp(it, dl);
     const r = await send({ type: 'download', url: it.url, filename: it.name });
     if (r.ok) toast('Download started');
     else {
@@ -232,6 +275,40 @@ async function downloadOne(it) {
         toast(r.error ? 'Downloads API: ' + r.error : 'Falling back to a tab');
         chrome.tabs.create({ url: it.url, active: false });
     }
+}
+/* Hand a direct link to an Android app. Launching an app needs a navigation
+ * with user activation: from the bottom sheet the page can do it (the tap in
+ * the iframe activated the page too); from the popup we ask the page's
+ * content script; failing both, show a real link for the user to tap. The
+ * link is copied first either way — 1DM/ADM pick it up from the clipboard. */
+async function sendToApp(it, dl, opts) {
+    opts = opts || {};
+    const intent = buildIntent(it.url, dl.pkg, it.kind, it.name);
+    const copied = !opts.skipCopy && appSettings.copyOnSend !== false;
+    if (copied) { try { await navigator.clipboard.writeText(it.url); } catch (e) {} }
+    const suffix = (copied ? ' · link copied' : '') + (opts.note || '');
+    if (window.self !== window.top) {
+        window.parent.postMessage({ type: 'mv-intent', intent }, '*');
+        toast('Sent to ' + dl.label + suffix);
+        return;
+    }
+    const r = await send({ type: 'openIntent', tabId: it.tabId != null ? it.tabId : state.curTabId, intent });
+    if (r.ok) { toast('Sent to ' + dl.label + suffix); return; }
+    showIntentLink(dl, intent, copied);
+}
+function showIntentLink(dl, intent, copied) {
+    const m = el('div', 'modal');
+    m.innerHTML = `<div class="mp"><h3></h3><div class="mb">
+        <div class="h"></div>
+        <a class="btn g" id="_ai" target="_top"></a>
+        <button class="btn" id="_ac">Close</button></div></div>`;
+    m.querySelector('h3').textContent = 'Open in ' + dl.label;
+    m.querySelector('.h').textContent = 'This page can’t launch the app by itself — tap the button.' +
+        (copied ? ' The link is also on the clipboard, so ' + dl.label + ' may already be offering it.' : '');
+    const a = m.querySelector('#_ai'); a.href = intent; a.textContent = 'Open in ' + dl.label;
+    m.querySelector('#_ac').onclick = () => m.remove();
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+    document.body.appendChild(m);
 }
 function copyText(text, msg) {
     navigator.clipboard.writeText(text).then(() => toast(msg || 'Copied'), () => toast('Copy failed'));
@@ -251,6 +328,13 @@ document.querySelectorAll('#actions [data-act]').forEach(b => {
         if (!items.length) return;
         const act = b.dataset.act;
         if (act === 'download') {
+            const dl = resolveDl(appSettings);
+            if (dl.pkg !== null && items.length > 1) {
+                // apps take one intent at a time: hand over the first, copy them all
+                try { await navigator.clipboard.writeText(items.map(i => i.url).join('\n')); } catch (e) {}
+                await sendToApp(items[0], dl, { skipCopy: true, note: ' · ' + items.length + ' links copied — add the rest from the clipboard' });
+                return;
+            }
             for (const it of items) { await downloadOne(it); await new Promise(r => setTimeout(r, 250)); }
         } else if (act === 'copy') {
             copyText(items.map(i => i.url).join('\n'), items.length + ' URLs copied');
@@ -292,9 +376,36 @@ async function renderSettings() {
       <div class="field inline"><label>Max entries per tab</label>
         <input type="number" id="s-max" min="50" max="2000" value="${s.maxPerTab}"></div>
 
+      <div class="tabhead" style="margin-top:18px">${svg('download', 13)}<span class="tt">DOWNLOADS</span><span class="rule"></span></div>
+      <div class="field inline"><label>Download with<span class="h">Browser = the browser's own download manager. Apps get the direct link via an Android intent; it's also copied to the clipboard as a backup (1DM and ADM pick it up from there).</span></label>
+        <select id="s-dlm">
+          <option value="browser">Browser downloader</option>
+          <option value="1dmplus">1DM+</option>
+          <option value="1dm">1DM</option>
+          <option value="1dmlite">1DM Lite</option>
+          <option value="adm">ADM</option>
+          <option value="admpro">ADM Pro</option>
+          <option value="chooser">App chooser (Open with…)</option>
+          <option value="custom">Custom package…</option>
+        </select></div>
+      <div class="field" id="s-dlpkg-row"><label>Custom download app package<span class="h">e.g. com.example.downloader</span></label>
+        <input type="text" id="s-dlpkg" value="${s.downloadPackage || ''}" placeholder="com.example.downloader"></div>
+      <div class="field inline"><label>Copy link when sending to an app<span class="h">Backup if the app doesn't open: paste it, or let the app auto-detect it</span></label>
+        <input type="checkbox" id="s-dlcopy" ${s.copyOnSend !== false ? 'checked' : ''}></div>
+
       <div class="tabhead" style="margin-top:18px">${svg('external', 13)}<span class="tt">EXTERNAL PLAYER</span><span class="rule"></span></div>
-      <div class="field"><label>Player package<span class="h">Blank = system chooser. e.g. org.videolan.vlc, com.mxtech.videoplayer.ad</span></label>
-        <input type="text" id="s-player" value="${s.playerPackage || ''}" placeholder="system chooser"></div>
+      <div class="field inline"><label>Open in player with</label>
+        <select id="s-playerpre">
+          <option value="">System chooser</option>
+          <option value="vlc">VLC</option>
+          <option value="mx">MX Player</option>
+          <option value="mxpro">MX Player Pro</option>
+          <option value="just">Just Player</option>
+          <option value="mpv">mpv</option>
+          <option value="custom">Custom package…</option>
+        </select></div>
+      <div class="field" id="s-player-row"><label>Custom player package<span class="h">e.g. com.mxtech.videoplayer.ad</span></label>
+        <input type="text" id="s-player" value="${s.playerPackage || ''}" placeholder="com.example.player"></div>
 
       <div class="tabhead" style="margin-top:18px">${svg('play', 13)}<span class="tt">QUICK ACCESS</span><span class="rule"></span></div>
       <div class="field inline"><label>Open gesture<span class="h">Avoid gestures your phone grabs (3-finger-down is often screenshot)</span></label>
@@ -331,6 +442,14 @@ async function renderSettings() {
     $('#s-corner').value = s.buttonCorner || 'tr';
     $('#s-gesture').value = s.gesture || 'tap3';
     $('#s-gtarget').value = s.gestureTarget || 'sheet';
+    $('#s-dlm').value = DL_APPS[s.downloadMethod] ? s.downloadMethod : 'browser';
+    const preset = Object.keys(PLAYERS).find(k => PLAYERS[k] === (s.playerPackage || ''));
+    $('#s-playerpre').value = !s.playerPackage ? '' : (preset || 'custom');
+    const syncRows = () => {
+        $('#s-dlpkg-row').style.display = $('#s-dlm').value === 'custom' ? '' : 'none';
+        $('#s-player-row').style.display = $('#s-playerpre').value === 'custom' ? '' : 'none';
+    };
+    $('#s-dlm').onchange = syncRows; $('#s-playerpre').onchange = syncRows; syncRows();
     $('#s-save').onclick = async () => {
         await send({ type: 'setSettings', settings: {
             buttonOn: $('#s-btn').checked,
@@ -341,7 +460,10 @@ async function renderSettings() {
             buttonSize: Math.max(28, Math.min(80, +$('#s-size').value || 44)),
             buttonCorner: $('#s-corner').value,
             minVideoPx: Math.max(0, Math.min(1000, +$('#s-minpx').value || 120)),
-            playerPackage: $('#s-player').value.trim(),
+            playerPackage: (() => { const p = $('#s-playerpre').value; return p === 'custom' ? $('#s-player').value.trim() : (PLAYERS[p] || ''); })(),
+            downloadMethod: $('#s-dlm').value,
+            downloadPackage: $('#s-dlpkg').value.trim(),
+            copyOnSend: $('#s-dlcopy').checked,
             collapseSegments: $('#s-collapse').checked,
             minSniffBytes: Math.round(Math.max(0, +$('#s-minb').value || 0) * 1048576),
             maxPerTab: Math.max(50, Math.min(2000, +$('#s-max').value || 300))
@@ -352,6 +474,7 @@ async function renderSettings() {
             localStorage.setItem('popupW', pw); localStorage.setItem('popupH', ph);
             if (window.__isPopup) applyPopupSizeStyle(pw, ph);
         } catch (e) {}
+        await loadSettings();
         toast('Settings saved');
     };
     $('#s-clear').onclick = async () => {
