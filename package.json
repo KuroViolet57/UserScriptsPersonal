@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dev-only: tests for Tab Vault and Media Vault. Nothing here ships in the extensions or userscripts.",
   "scripts": {
-    "test": "node --test \"tests/**/*.test.mjs\""
+    "test": "node --test --test-force-exit --test-timeout=30000 \"tests/**/*.test.mjs\""
   },
   "devDependencies": {
     "jsdom": "31.0.1"

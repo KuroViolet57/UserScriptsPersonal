@@ -222,7 +222,7 @@
                 let id = ssGet(), src = 'sessionStorage';
                 if (id && navType() === 'navigate') {
                     // Duplicated tab: same id, same URL, and the original is alive.
-                    const e = readLive()[id];
+                    const e = liveEntry(id);
                     if (e && !e.gone && e.url === location.href && now() - e.seen < settings.heartbeatSec * 4000) id = null;
                 }
                 if (!id) { id = rid('v'); src = 'new'; }
@@ -247,12 +247,61 @@
     }
 
     /* ===================================================================== *
-     *  Live registry: { [tabId]: entry } in one shared value
+     *  Live registry: one key per tab, live.<tabId>
+     *  A tab only ever writes its own entry (a shared map let one tab's
+     *  heartbeat overwrite another tab's "closing" mark). liveRev is bumped on
+     *  real changes (register, navigate, close, sweep) so other tabs re-read;
+     *  a heartbeat only refreshes the tab's own key. The 1.0.0 shared `live`
+     *  map is still read (and swept) while old-version tabs are around.
+     *  Without GM_listValues the shared map is used, as before.
      * ===================================================================== */
-    function readLive() { return gv(K.LIVE, {}); }
+    const LIVE_P = 'live.';
+    const PER_TAB = Array.isArray(glist());
+    const liveKey = id => LIVE_P + id;
+    function readLive() {
+        const out = {};
+        const legacy = gv(K.LIVE, {});
+        for (const id in legacy) if (legacy[id] && typeof legacy[id] === 'object') out[id] = legacy[id];
+        if (PER_TAB) for (const k of (glist() || [])) {
+            if (k.indexOf(LIVE_P) !== 0) continue;
+            const v = gv(k, null);
+            if (v && typeof v === 'object') out[k.slice(LIVE_P.length)] = v;
+        }
+        return out;
+    }
+    function liveEntry(id) {
+        if (!id) return null;
+        if (PER_TAB) { const v = gv(liveKey(id), null); if (v && typeof v === 'object') return v; }
+        const legacy = gv(K.LIVE, {});
+        return (legacy[id] && typeof legacy[id] === 'object') ? legacy[id] : null;
+    }
+    function putLive(id, entry) {              // entry null = remove
+        if (PER_TAB) { if (entry) gset(liveKey(id), entry); else gdel(liveKey(id)); return; }
+        const live = gv(K.LIVE, {});
+        if (entry) live[id] = entry; else delete live[id];
+        capLive(live);
+        gset(K.LIVE, live);
+    }
+    function removeLive(ids) {
+        if (!ids.length) return;
+        if (PER_TAB) ids.forEach(id => gdel(liveKey(id)));
+        const legacy = gv(K.LIVE, {});
+        let changed = false;
+        ids.forEach(id => { if (legacy[id]) { delete legacy[id]; changed = true; } });
+        if (changed) { if (Object.keys(legacy).length) gset(K.LIVE, legacy); else gdel(K.LIVE); }
+        bumpLive();
+    }
+    function bumpLive() { if (PER_TAB) gset('liveRev', now() + Math.random()); }
+    function resetLive() {
+        if (PER_TAB) (glist() || []).filter(k => k.indexOf(LIVE_P) === 0).forEach(k => gdel(k));
+        gdel(K.LIVE);
+        lastSig = '';
+        bumpLive();
+    }
     let lastFocusAt = document.visibilityState === 'visible' ? BOOT_AT : 0;
-    let lastLiveWrite = 0, liveTimer = null, lastHeal = 0;
+    let lastLiveWrite = 0, liveTimer = null, lastHeal = 0, lastSig = '';
     function trackingOn() { return !!(TAB_ID && settings.trackLive && !excludedUrl(location.href)); }
+    const sigOf = e => e.url + '\n' + e.title + '\n' + e.fav + '\n' + e.vis;
 
     function selfEntry() {
         return {
@@ -272,11 +321,11 @@
     function writeLive() {
         clearTimeout(liveTimer); liveTimer = null;
         if (!trackingOn() || gone) return;
-        const live = readLive();
-        live[TAB_ID] = selfEntry();
-        capLive(live);
-        gset(K.LIVE, live);
+        const me = selfEntry();
+        putLive(TAB_ID, me);
         lastLiveWrite = now();
+        const sig = sigOf(me);
+        if (sig !== lastSig) { lastSig = sig; bumpLive(); }      // a plain heartbeat tells nobody
         saveTabTM();
     }
     function scheduleLiveWrite(delay) {
@@ -285,8 +334,8 @@
     }
     function removeSelfFromLive() {
         if (!TAB_ID) return;
-        const live = readLive();
-        if (live[TAB_ID] && live[TAB_ID].inst === INST) { delete live[TAB_ID]; gset(K.LIVE, live); }
+        const me = liveEntry(TAB_ID);
+        if (me && me.inst === INST) { putLive(TAB_ID, null); lastSig = ''; bumpLive(); }
     }
     function saveTabTM() {
         if (!API.saveTab || !tmTab) return;
@@ -337,11 +386,12 @@
                 if (t - e.gone > settings.closedAfterSec * 1000 + 5000) continue;
                 if (refMatches(e.url, ref) && (!best || e.gone > best.gone)) best = e;
             }
-            if (best) best.nav = true;
+            if (best) { best.nav = true; putLive(best.id, best); }
         }
-        live[TAB_ID] = selfEntry();
-        capLive(live);
-        gset(K.LIVE, live);
+        const me = selfEntry();
+        putLive(TAB_ID, me);
+        lastSig = sigOf(me);
+        bumpLive();
         lastLiveWrite = t;
         saveTabTM();
         // This tab was filed as closed/lost but is evidently alive: un-file it.
@@ -358,31 +408,55 @@
         } catch (e) { return false; }
     }
 
-    /* Something else wrote the registry. Re-add ourselves if a racing write
-     * dropped us, and split off if a duplicated tab shares our id. */
-    function onLiveChange(newV) {
-        if (trackingOn() && !gone) {
-            const live = (newV && typeof newV === 'object') ? newV : {};
-            const me = live[TAB_ID];
-            if (!me || me.inst !== INST) {
-                if (me && !me.gone && ID_SRC !== 'GM_getTab' && me.seen > BOOT_AT &&
-                    (me.at < BOOT_AT || (me.at === BOOT_AT && me.inst < INST))) {
-                    // an older live twin owns this id: take a fresh one
-                    TAB_ID = rid('v'); ID_SRC = 'new (twin split)'; ssSet(TAB_ID);
-                    scheduleLiveWrite(50 + Math.random() * 200);
-                } else if (now() - lastHeal > 2000) {
-                    lastHeal = now();
-                    scheduleLiveWrite(300 + Math.random() * 700);
-                }
-            }
+    /* Someone else wrote OUR key: a duplicated tab carrying our id (an older
+     * live twin keeps it, we take a fresh one), or a sweep dropped us while we
+     * are alive (re-add). */
+    function isOlderTwin(e) {
+        return !!e && !e.gone && e.inst !== INST && ID_SRC !== 'GM_getTab' && e.seen > BOOT_AT &&
+            (e.at < BOOT_AT || (e.at === BOOT_AT && e.inst < INST));
+    }
+    function checkSelf() {
+        if (!trackingOn() || gone) return;
+        const me = liveEntry(TAB_ID);
+        if (me && me.inst === INST) return;
+        if (isOlderTwin(me)) splitTwin();
+        else if (now() - lastHeal > 2000) {
+            lastHeal = now(); lastSig = '';
+            scheduleLiveWrite(300 + Math.random() * 700);
         }
+    }
+    function splitTwin() {
+        TAB_ID = rid('v'); ID_SRC = 'new (twin split)'; ssSet(TAB_ID);
+        lastSig = '';
+        subscribeOwn();
+        startCmdChannel();          // commands now arrive on cmd.<new id>
+        scheduleLiveWrite(50 + Math.random() * 200);
+    }
+    function subscribeOwn() {
+        if (!PER_TAB || !TAB_ID) return;
+        const id = TAB_ID;
+        onChange(liveKey(id), () => { if (id === TAB_ID) checkSelf(); });
+    }
+    /* The registry changed somewhere (liveRev, or the old shared map). */
+    function onLiveChange() {
+        checkSelf();
         liveChanged();
     }
 
     /* ---------------------- closed detection (sweep) ---------------------- */
     let sweeping = false;
+    /* One sweeper at a time: the visible tab always sweeps; hidden tabs only
+     * while they hold the lease (every tab sweeping on every heartbeat made
+     * them overwrite each other's closed-list edits). */
+    function takeSweepLease() {
+        const l = gv('sweepLease', null), t = now();
+        if (document.visibilityState !== 'visible' && l && l.id !== TAB_ID && l.until > t) return false;
+        gset('sweepLease', { id: TAB_ID, until: t + Math.max(30, settings.heartbeatSec * 3) * 1000 });
+        return true;
+    }
     async function sweep() {
         if (sweeping || !TAB_ID) return;
+        if (!takeSweepLease()) return;
         sweeping = true;
         try {
             const tm = await tmTabs();
@@ -410,11 +484,15 @@
                     delete live[id]; removed.push(id);
                 }
             }
+            // Too many entries: drop the longest-silent (not filed).
+            const left = Object.keys(live).filter(id => id !== TAB_ID);
+            const max = Math.max(20, settings.maxLive | 0);
+            if (left.length + 1 > max) {
+                left.sort((a, b) => (live[a].seen || 0) - (live[b].seen || 0))
+                    .slice(0, left.length + 1 - max).forEach(id => removed.push(id));
+            }
             if (!removed.length) return;
-            // Re-read right before writing so other tabs' fresh entries survive.
-            const fresh = readLive();
-            removed.forEach(id => { delete fresh[id]; });
-            gset(K.LIVE, fresh);
+            removeLive(removed);
             removed.forEach(id => gdel('cmd.' + id));
             if (toFile.length && settings.captureClosed) fileClosed(toFile);
         } finally { sweeping = false; }
@@ -441,12 +519,30 @@
     /* ===================================================================== *
      *  History log (pages seen), newest first
      * ===================================================================== */
-    let lastPageTouch = 0;
+    let lastPageTouch = 0, pageT = null;
+    /* A new visit is logged at once; title/favicon updates are batched (10 s)
+     * and skipped when nothing changed: the whole log is one value, and
+     * pages with a ticking title rewrote it every 1.5 s. */
     function logPage(newVisit) {
+        if (!settings.logPages || excludedUrl(location.href)) return;
+        if (!newVisit) {
+            if (!pageT) pageT = setTimeout(() => { pageT = null; logPageNow(false); }, 10000);
+            return;
+        }
+        clearTimeout(pageT); pageT = null;
+        logPageNow(true);
+    }
+    function flushPageLog() { if (pageT) { clearTimeout(pageT); pageT = null; logPageNow(false); } }
+    function logPageNow(newVisit) {
         if (!settings.logPages || excludedUrl(location.href)) return;
         const url = location.href, t = now();
         const pages = gv(K.PAGES, []);
         const i = pages.findIndex(p => p && p.url === url);
+        if (!newVisit && i === 0) {
+            const cur = pages[0], f0 = faviconUrl();
+            const title = document.title ? String(document.title).slice(0, 300) : cur.title;
+            if (cur.title === title && (!f0 || cur.fav === f0) && t - (cur.lastSeen || 0) < 4.5 * 60000) { lastPageTouch = t; return; }
+        }
         let e = i >= 0 ? pages.splice(i, 1)[0] : null;
         if (!e) e = { url, title: '', fav: '', firstSeen: t, lastSeen: t, visits: 0 };
         if (newVisit || !e.visits) e.visits = (e.visits || 0) + 1;
@@ -458,7 +554,7 @@
         lastPageTouch = t;
         if (newVisit) {   // a racing write from another tab can drop it: check once
             setTimeout(() => {
-                if (!gv(K.PAGES, []).some(p => p && p.url === url)) logPage(false);
+                if (!gv(K.PAGES, []).some(p => p && p.url === url)) logPageNow(false);
             }, 1800 + Math.random() * 800);
         }
     }
@@ -490,7 +586,8 @@
     }
     function startCmdChannel() {
         if (!TAB_ID) return;
-        const m = onChange('cmd.' + TAB_ID, () => handleCmds());
+        const id = TAB_ID;
+        const m = onChange('cmd.' + id, () => { if (id === TAB_ID) handleCmds(); });
         cmdMode = m;
         if (m === 'poll') {
             clearInterval(cmdPollTimer);
@@ -513,7 +610,7 @@
             ack = gv('ack.' + n, null);
             if (ack && ack.s !== 'closing') break;
             if (action === 'close' && ack && ack.s === 'closing') {
-                const e = readLive()[toId];
+                const e = liveEntry(toId);
                 if (!e || e.gone) break;   // it went away: closed
             }
         }
@@ -2142,7 +2239,7 @@ pre.diag{background:var(--bg);border:1px solid var(--line);border-radius:10px;pa
             gset(K.PAGES, []); state.histSel.clear(); render();
         };
         A('rebuild').onclick = () => {
-            gset(K.LIVE, {}); lastHeal = 0; writeLive();
+            resetLive(); lastHeal = 0; writeLive();
             toast('Registry emptied — tabs re-register as they check in');
         };
         A('cap').onclick = () => { const o = A('capout'); o.style.display = 'block'; o.textContent = 'Probing…'; capabilities().then(t => { o.textContent = t; }); };
@@ -2189,7 +2286,7 @@ pre.diag{background:var(--bg);border:1px solid var(--line);border-radius:10px;pa
         if (Array.isArray(grants)) add('granted', grants.join(', '));
         L.push('', '--- data ---');
         [K.LIVE, K.PAGES, K.CLOSED_TABS, K.CLOSED_WINDOWS, K.SESSIONS, K.SAVED_GROUPS].forEach(k => {
-            const v = gv(k, k === K.LIVE ? {} : []);
+            const v = k === K.LIVE ? readLive() : gv(k, []);
             const count = Array.isArray(v) ? v.length : Object.keys(v).length;
             let size = 0; try { size = JSON.stringify(v).length; } catch (e) {}
             add(k, count + ' item(s), ' + (size < 1024 ? size + ' B' : '~' + Math.round(size / 1024) + ' KB'));
@@ -2476,11 +2573,12 @@ pre.diag{background:var(--bg);border:1px solid var(--line);border-radius:10px;pa
     function onPageHide(e) {
         if (!TAB_ID) return;
         if (!trackingOn()) { gone = true; return; }
-        const live = readLive();
-        if (e.persisted || now() - navFlagAt < 5000) delete live[TAB_ID];   // navigation, not a close
-        else { const me = selfEntry(); me.gone = now(); live[TAB_ID] = me; }
+        flushPageLog();
+        if (e.persisted || now() - navFlagAt < 5000) putLive(TAB_ID, null);   // navigation, not a close
+        else { const me = selfEntry(); me.gone = now(); putLive(TAB_ID, me); }
         gone = true;
-        gset(K.LIVE, live);
+        lastSig = '';
+        bumpLive();
     }
     function onPageShow(e) {
         if (!e.persisted || !TAB_ID) return;
@@ -2526,10 +2624,13 @@ pre.diag{background:var(--bg);border:1px solid var(--line);border-radius:10px;pa
         registerSelf();
         logPage(true);
         setTimeout(() => {   // titles and favicons often arrive late
-            if (trackingOn() && (document.title !== lastTitle || !readLive()[TAB_ID] || !readLive()[TAB_ID].fav)) { lastTitle = document.title; writeLive(); logPage(false); }
+            const me = liveEntry(TAB_ID);
+            if (trackingOn() && (document.title !== lastTitle || !me || !me.fav)) { lastTitle = document.title; writeLive(); logPage(false); }
         }, 2500);
 
-        onChange(K.LIVE, onLiveChange);
+        onChange(K.LIVE, onLiveChange);       // 1.0.0 tabs still write the shared map
+        onChange('liveRev', onLiveChange);
+        subscribeOwn();
         onChange(K.SETTINGS, () => settingsChanged());
         onChange(K.FABPOS, () => placeFab());
         startCmdChannel();
