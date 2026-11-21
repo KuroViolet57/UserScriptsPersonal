@@ -28,7 +28,9 @@ const DEFAULT_SETTINGS = {
     minSniffBytes: 0,        // ignore network media smaller than this (0 = keep all)
     gesture: 'tap3',         // off | tap3 | tap4 | swipe3up | swipe3down
     gestureTarget: 'sheet',  // sheet | panel (on-page) | popup (native) | tab
-    popupW: 0, popupH: 0     // toolbar-popup size in px; 0 = browser default
+    popupW: 0, popupH: 0,    // toolbar-popup size in px; 0 = browser default
+    askWhereToSave: false,   // chrome.downloads saveAs (Vivaldi 8.3 honours it, VAB-13554)
+    ignorePrivate: false     // skip private tabs entirely (otherwise kept in memory only)
 };
 
 /* ------------------------------ storage ------------------------------ */
@@ -109,19 +111,52 @@ function segmentKey(url) {
 let media = null;                 // in-memory copy; mirrored to storage
 let saveTimer = null;
 
+/* Private tabs: Vivaldi 8.3+ runs extensions in private tabs (VAB-13631).
+ * Their detections must never reach disk, so private buckets are kept in
+ * chrome.storage.session (memory only, survives worker restarts, wiped when
+ * the browser closes) and filtered out of the chrome.storage.local copy. */
+const SESSION = (chrome.storage && chrome.storage.session) || null;
+const privateTabs = new Set(), publicTabs = new Set();
+async function isPrivateTab(tabId) {
+    if (privateTabs.has(tabId)) return true;
+    if (publicTabs.has(tabId)) return false;
+    try {
+        const t = await chrome.tabs.get(tabId);
+        (t && t.incognito ? privateTabs : publicTabs).add(tabId);
+        return !!(t && t.incognito);
+    } catch (e) { return false; }
+}
+
 async function loadMedia() {
-    if (media == null) media = await get(K.MEDIA, {});
+    if (media == null) {
+        media = await get(K.MEDIA, {});
+        if (SESSION) {
+            try {
+                const o = await SESSION.get({ [K.MEDIA]: {} });
+                Object.assign(media, o[K.MEDIA] || {});
+            } catch (e) {}
+        }
+    }
     return media;
 }
 function scheduleSave() {
     if (saveTimer) return;
-    saveTimer = setTimeout(() => { saveTimer = null; set(K.MEDIA, media || {}); }, 500);
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        const disk = {}, mem = {};
+        for (const tid in (media || {})) (media[tid].private ? mem : disk)[tid] = media[tid];
+        set(K.MEDIA, disk);
+        if (SESSION) { try { SESSION.set({ [K.MEDIA]: mem }); } catch (e) {} }
+    }, 500);
 }
 
 async function addItem(tabId, item) {
     const s = await getSettings();
     await loadMedia();
+    const priv = await isPrivateTab(tabId);
+    if (priv && s.ignorePrivate) return;
     const bucket = media[tabId] || (media[tabId] = { items: [], updatedAt: 0 });
+    if (priv) bucket.private = true;
     bucket.updatedAt = Date.now();
 
     // range-request / repeat dedupe by URL
@@ -236,6 +271,7 @@ chrome.webRequest.onHeadersReceived.addListener(details => {
 
 /* ------------------------------ lifecycle ------------------------------ */
 chrome.tabs.onRemoved.addListener(async tabId => {
+    privateTabs.delete(tabId); publicTabs.delete(tabId);
     await loadMedia();
     if (media[tabId]) { delete media[tabId]; scheduleSave(); }
 });
@@ -262,7 +298,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 } else {
                     const all = [];
                     for (const tid in media) {
-                        for (const it of await visibleItems(media[tid])) all.push(Object.assign({ tabId: +tid }, it));
+                        const priv = !!media[tid].private;
+                        for (const it of await visibleItems(media[tid])) all.push(Object.assign({ tabId: +tid, private: priv }, it));
                     }
                     sendResponse({ ok: true, items: all });
                 }
@@ -300,7 +337,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         const id = await chrome.downloads.download({
                             url: msg.url,
                             filename: msg.filename || undefined,
-                            saveAs: false
+                            saveAs: !!(await getSettings()).askWhereToSave
                         });
                         sendResponse({ ok: true, id });
                     } catch (e) {

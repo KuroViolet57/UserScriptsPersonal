@@ -57,13 +57,24 @@ exempt since their size can't be known.
 ## Install
 
 1. **Easiest:** open the prebuilt zip link on the phone —
-   <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/media-vault.zip> — it downloads ready to install.
+   <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/ccr-b432f84b-h7f7j6/dist/media-vault.zip> — it downloads ready to install.
    (Or copy the `media-sniffer-ext/` folder and zip it yourself.)
 2. Browser → Extensions → enable Developer mode → **Load unpacked** / install
-   from file. On **Vivaldi**: unzip to a permanent folder, Load unpacked from it,
-   and for updates extract the new zip over that folder and tap **Update** on
-   `vivaldi://extensions`.
+   from file. On **Vivaldi** (Android 8.2+ or desktop): unzip to a permanent
+   folder, Load unpacked from it on `vivaldi://extensions`, and for updates
+   extract the new zip over that folder and tap **Update**.
 3. Play a video, then open the popup — or tap the button on the video itself.
+
+## Vivaldi 8.3 / 8.4 notes (Media Vault 1.6.0)
+
+| Vivaldi change | Effect on Media Vault |
+| --- | --- |
+| **8.3 Android: extensions run in Private tabs** (VAB-13631) | Media from private tabs is kept in `chrome.storage.session` (memory only, gone when the browser closes) and never written to disk. Setup → Detection → **Ignore private tabs** skips them entirely. Allow it under the extension's details → *Allow in Incognito/Private*. |
+| **8.3 Android: download location prompt fixed** (VAB-13554 — 8.2 always asked) | Setup → Downloads → **Ask where to save** (off by default) controls the browser downloader's save-as dialog. |
+| **8.3 Android: extensions install with an external download manager enabled** (VAB-13693) | You can keep 1DM/ADM as Vivaldi's download handler and still install/update the zip. |
+| **8.3 Android: runtime host-permission prompts work** (VAB-13594, VAB-13671) | Setup → Diagnostics shows site access; if Media Vault is switched off for some sites, **Allow on all sites** asks again (from the full page). |
+| **8.3 Android: "Open in app" keeps the tab open** (VAB-13928, VAB-1720) | Handing a link to 1DM/ADM/VLC through an `intent:` no longer costs you the page. |
+| **8.4: `action.getUserSettings().isOnToolbar`** (VB-125404) | Setup shows whether the icon is pinned to the toolbar. |
 
 ## Updating
 

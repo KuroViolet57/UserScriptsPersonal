@@ -119,7 +119,7 @@ so import/export has to run from a real tab. (Paste JSON works anywhere.)
 Because the browser has to allow local extensions:
 
 1. **Easiest:** open the prebuilt zip link on the phone —
-   <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/tab-vault.zip> — it downloads ready to install.
+   <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/ccr-b432f84b-h7f7j6/dist/tab-vault.zip> — it downloads ready to install.
    (Or download/copy the `tab-manager/` folder and zip it yourself.)
 2. In the browser: **Settings → Extensions** (or `chrome://extensions`), enable
    **Developer mode** if present.
@@ -152,10 +152,13 @@ install is always safe.
 > current install, so carry data over once via Export → install v1.5.1+ →
 > Import → remove the old copy. Every update after that lands in place.
 
-### Vivaldi (Android snapshot) flow
+### Vivaldi flow (Android 8.2+ stable, and desktop)
 
-Vivaldi uses desktop Chrome's extensions page: **Load unpacked** registers a
-*folder*, and the **Update** button reloads every unpacked extension from disk.
+Extensions are part of stable Vivaldi for Android since **8.2** (Sept 2026) —
+the puzzle icon in the address bar opens the extensions menu, where you can
+pin Tab Vault next to the address bar. Vivaldi uses desktop Chrome's
+extensions page: **Load unpacked** registers a *folder*, and the **Update**
+button reloads every unpacked extension from disk.
 
 - One-time: unzip into a permanent folder (e.g. `Download/extensions/tab-vault/`)
   and Load unpacked from there.
@@ -163,6 +166,23 @@ Vivaldi uses desktop Chrome's extensions page: **Load unpacked** registers a
   tap **Update** on `vivaldi://extensions`. Same ID, data intact, no reinstall.
 - A stale `manager.css` left in the folder from before v1.12 is harmless — the
   styles now live inside `manager.html`.
+
+## Vivaldi 8.3 / 8.4 notes (Tab Vault 1.13.0)
+
+What changed in Vivaldi since 1.12.1, and what Tab Vault does about it:
+
+| Vivaldi change | Effect on Tab Vault |
+| --- | --- |
+| **8.3 Android: extensions run in Private tabs** (VAB-13631, VAB-13742) | Private tabs show in *Open* with a 🔑 *private* tag (toggle: Setup → Browser), but are **never** mirrored to storage, so they are never captured as closed and never land on disk. |
+| **8.3 Android: MV3 runtime permission prompts work** (VAB-13594, VAB-13671, VAB-13530) | Setup → Browser checks site access. If it's limited (Vivaldi lets you switch an extension off per site) the gestures can't run there; **Allow on all sites** asks again — from the full page, since the prompt still closes the toolbar popup. The History permission can also be granted from the full page now. |
+| **8.3 desktop: Chrome's Tab Groups API** (VB-131507) | Groups are reported by the API on desktop Vivaldi, so stage 1 of the group handling below just works. Android still reports Tab Stacks inconsistently — the fallbacks stay. |
+| **8.3 desktop: bookmark writes from extensions now default to *Other Bookmarks*** (VB-131708, VB-125831) | ⭐ bookmarking asks the browser for its default folder (*Automatic*) instead of forcing the first top-level folder, and Setup → Browser → **Bookmark into** lets you pick any folder. |
+| **8.4: `action.getUserSettings().isOnToolbar`** (VB-125404) | Setup shows whether Tab Vault is pinned to the toolbar and tells you how to pin it. |
+| 8.3 fixes: disabled extensions no longer re-enable after a restart (VAB-13534); background tabs opened by an extension no longer reload on first view with *Always show desktop site* (VAB-13705) | Unloaded (discarded) restores now stay unloaded on Vivaldi Android with desktop mode on. |
+
+Capabilities (Setup → Diagnostics) now also prints site access, private-tab
+access, toolbar pin state and the Chromium major version (Vivaldi 8.3 =
+Chromium 156).
 
 ## How closed-window capture works
 

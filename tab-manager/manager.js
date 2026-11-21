@@ -13,7 +13,9 @@ const DEFAULT_SETTINGS = {
     maxClosedWindows: 50, maxClosedTabs: 300, gesture: 'swipe3up', gestureTarget: 'sheet',
     gesture2: 'off', gestureTarget2: 'groupsheet',
     popupW: 0, popupH: 0,  // toolbar-popup size in px; 0 = browser default
-    restoreUnloaded: true  // discard restored tabs so they load only when tapped
+    restoreUnloaded: true, // discard restored tabs so they load only when tapped
+    bookmarkParent: 'auto',// bookmark folder destination: auto | <bookmark node id>
+    showPrivate: true      // list private tabs in Open (they are never captured or stored)
 };
 const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const HAS_GROUPS = !!(chrome.tabGroups && chrome.tabs.group);
@@ -267,6 +269,7 @@ async function loadLive() {
     // as N identical windows. A tab reports exactly one windowId, so grouping by
     // that can't duplicate.
     const allTabs = await chrome.tabs.query({});
+    const showPrivate = (await getSettings()).showPrivate !== false;
     const cur = await chrome.windows.getCurrent().catch(() => null);
     let winMeta = [];
     try { winMeta = await chrome.windows.getAll({}); } catch (e) {}
@@ -277,12 +280,14 @@ async function loadLive() {
         if (t.id == null || seenTabs.has(t.id)) continue;
         seenTabs.add(t.id);
         if (SELF_URL && (t.url || '').startsWith(SELF_URL)) continue;   // hide our own page
+        if (t.incognito && !showPrivate) continue;
         const wid = (t.windowId == null ? -1 : t.windowId);
         if (!byWin.has(wid)) byWin.set(wid, []);
         byWin.get(wid).push({
             id: t.id, url: t.url || t.pendingUrl || '', title: t.title || '',
             favIconUrl: t.favIconUrl || '', pinned: !!t.pinned,
-            groupId: (t.groupId == null ? -1 : t.groupId), windowId: wid, active: !!t.active
+            groupId: (t.groupId == null ? -1 : t.groupId), windowId: wid, active: !!t.active,
+            incognito: !!t.incognito
         });
     }
 
@@ -398,6 +403,11 @@ function tabRow(t) {
     }
     if (t.pinned) {
         const p = el('span', 'pill'); p.innerHTML = svg('pin', 10) + ' pinned';
+        p.style.cssText = 'display:inline-flex;align-items:center;gap:3px'; meta.appendChild(p);
+    }
+    if (t.incognito) {
+        const p = el('span', 'pill'); p.innerHTML = svg('key', 10) + ' private';
+        p.title = 'Private tab — shown live, never captured as closed or kept on disk';
         p.style.cssText = 'display:inline-flex;align-items:center;gap:3px'; meta.appendChild(p);
     }
     if (t.active) { const a = el('span', 'live'); a.textContent = '● active'; meta.appendChild(a); }
@@ -688,7 +698,7 @@ async function renderHist() {
             <div class="cm">${!granted
                 ? 'The <b>history</b> permission isn’t granted on this install yet. It is part of the extension since v1.12.1, so <b>reloading it</b> (Update on the extensions page, or reinstalling the zip) grants it with no prompt at all.' +
                   (inPopup ? ' Asking for it from the toolbar popup can’t work on Android — the prompt closes the popup — so the button below opens the full page first.'
-                           : ' You can also ask for it here.')
+                           : ' You can also ask for it here (the runtime prompt works on Vivaldi 8.3+; on 8.2 it never appeared).')
                 : 'This browser doesn’t expose the history API to extensions, so this section can’t work here.'}</div>`;
         const cb = el('div', 'cb');
         if (!granted) cb.appendChild(mk('Grant history access', () => {
@@ -962,6 +972,13 @@ async function renderSettings() {
         <input type="number" id="s-pw" min="0" max="800" step="10" value="${s.popupW || 0}" style="width:70px">
         <input type="number" id="s-ph" min="0" max="900" step="10" value="${s.popupH || 0}" style="width:70px"></div>
 
+      <div class="sechead alt">${svg('bookmark', 14)}<span class="st">Browser</span><span class="rule"></span></div>
+      <div class="field inline"><label>Bookmark into<span class="h">Where ⭐ creates its folder. Automatic = the browser's default (Other Bookmarks on Chrome and on Vivaldi 8.3+)</span></label>
+        <select id="s-bmparent"><option value="auto">Automatic</option></select></div>
+      <div class="field inline"><label>Show private tabs in Open<span class="h">Private tabs are listed live only — never captured as closed, never written to storage</span></label>
+        <input type="checkbox" id="s-private" ${s.showPrivate !== false ? 'checked' : ''}></div>
+      <div class="field" id="s-access"><div class="h">Checking site access…</div></div>
+
       <div class="field" style="margin-top:18px"><button class="btn p" id="s-save" data-ico="save" style="width:100%">Save settings</button></div>
 
       <div class="sechead alt">${svg('save', 14)}<span class="st">Your data</span><span class="rule"></span></div>
@@ -991,9 +1008,12 @@ async function renderSettings() {
     $('#s-gtarget').value = s.gestureTarget || 'sheet';
     $('#s-gesture2').value = s.gesture2 || 'off';
     $('#s-gtarget2').value = s.gestureTarget2 || 'groupsheet';
+    fillBrowserSection(s);
 
     $('#s-save').onclick = async () => {
         await set(K.SETTINGS, {
+            bookmarkParent: $('#s-bmparent').value || 'auto',
+            showPrivate: $('#s-private').checked,
             captureClosed: $('#s-capture').checked,
             restoreUnloaded: $('#s-unload').checked,
             gesture: $('#s-gesture').value,
@@ -1087,6 +1107,35 @@ async function renderSettings() {
     }
 }
 
+/* Setup → Browser: fill the bookmark-folder picker and the access card
+ * (site access, private tabs, toolbar pin). Async so the page renders first. */
+async function fillBrowserSection(s) {
+    const sel = $('#s-bmparent');
+    for (const f of await bookmarkFolderChoices()) {
+        const o = document.createElement('option'); o.value = f.id; o.textContent = f.title; sel.appendChild(o);
+    }
+    sel.value = s.bookmarkParent || 'auto';
+    if (sel.value !== (s.bookmarkParent || 'auto')) sel.value = 'auto';   // picked folder is gone
+
+    const box = $('#s-access'); if (!box) return;
+    const [all, pinned, priv] = await Promise.all([hasAllSites(), isOnToolbar(), incognitoAllowed()]);
+    box.innerHTML = '';
+    const line = (ok, html) => { const d = el('div', 'h'); d.innerHTML = (ok ? '✅ ' : '⚠️ ') + html; box.appendChild(d); };
+    if (all === false) {
+        line(false, 'Site access is limited — gestures only work on sites Tab Vault may run on.');
+        box.appendChild(mk('Allow on all sites', async () => {
+            if (await isPopupContext()) return openFullPage('settings');
+            const r = await requestAllSites();
+            if (r.ok) { toast('Site access granted — reload open pages'); renderSettings(); }
+            else toast(r.error ? 'Request failed: ' + r.error : 'Not granted — set it on the extension’s details page (Site access → On all sites)');
+        }, '', 'key'));
+    } else if (all === true) line(true, 'Runs on all sites (gestures available everywhere).');
+    if (priv === false) line(false, 'Not allowed in private tabs — enable “Allow in Incognito/Private” on the extension’s details page to use gestures there (Vivaldi 8.3+).');
+    else if (priv === true) line(true, 'Allowed in private tabs (they are listed live but never stored).');
+    if (pinned === false) line(false, 'Not pinned to the toolbar — pin it from the extensions (puzzle) menu for one-tap access.');
+    else if (pinned === true) line(true, 'Pinned to the toolbar.');
+}
+
 /* Full sweep of what this browser exposes to THIS extension: presence of the
  * chrome.* APIs worth having, then safe read-only calls to see which actually
  * work (Android builds often ship the object but throw on use). Namespaces we
@@ -1161,6 +1210,10 @@ async function probeCapabilities() {
             chrome.permissions.contains({ permissions: ['history'] }, ok => { void chrome.runtime.lastError; r(!!ok); }));
         add('"history" permission granted', String(hasHist));
     }
+    add('site access <all_urls>', String(await hasAllSites()));
+    add('allowed in private tabs', String(await incognitoAllowed()));
+    add('action.isOnToolbar', String(await isOnToolbar()));
+    add('Chromium major', String(chromiumVersion() || 'unknown'));
     L.push(...loadTimingReport(32));
     return L.join('\n');
 }
@@ -1466,14 +1519,92 @@ async function bookmarkUrls(tabs, name) {
     const r = await askText('Bookmark folder name', name || ('Tab Vault ' + new Date().toLocaleDateString()));
     if (!r) return;
     try {
-        const roots = await chrome.bookmarks.getTree();
-        const bar = (roots[0].children || [])[0];
-        const folder = await chrome.bookmarks.create({ parentId: bar ? bar.id : undefined, title: r.text || 'Tab Vault' });
+        const folder = await createBookmarkFolder(r.text || 'Tab Vault');
         for (const t of usable) {
             try { await chrome.bookmarks.create({ parentId: folder.id, title: t.title || t.url, url: t.url }); } catch (e) {}
         }
         toast(`Bookmarked ${usable.length} tabs`);
     } catch (e) { toast('Bookmarking failed: ' + (e.message || e)); }
+}
+
+/* Where new bookmark folders go. 'auto' lets the browser pick its default
+ * (Chrome: Other bookmarks; Vivaldi 8.3+ switched its extension default to
+ * Other Bookmarks too, VB-131708) and falls back to the first top-level
+ * folder on builds that reject a missing parentId. Any other value is the id
+ * of a folder picked in Setup → Browser. */
+async function createBookmarkFolder(title) {
+    const want = (await getSettings()).bookmarkParent || 'auto';
+    if (want !== 'auto') {
+        try {
+            const [node] = await chrome.bookmarks.get(want);
+            if (node && !node.url) return await chrome.bookmarks.create({ parentId: node.id, title });
+        } catch (e) { /* folder deleted since it was picked: fall through */ }
+    }
+    try { return await chrome.bookmarks.create({ title }); }
+    catch (e) {
+        const roots = await chrome.bookmarks.getTree();
+        const first = (roots[0].children || [])[0];
+        return await chrome.bookmarks.create({ parentId: first ? first.id : undefined, title });
+    }
+}
+
+/* Top-level bookmark folders plus one level below, for the Setup picker. */
+async function bookmarkFolderChoices() {
+    if (!chrome.bookmarks || !chrome.bookmarks.getTree) return [];
+    try {
+        const roots = await chrome.bookmarks.getTree();
+        const out = [];
+        for (const top of (roots[0].children || [])) {
+            if (top.url) continue;
+            out.push({ id: top.id, title: top.title || ('Folder ' + top.id) });
+            for (const c of (top.children || [])) {
+                if (!c.url) out.push({ id: c.id, title: (top.title || top.id) + ' › ' + (c.title || c.id) });
+            }
+        }
+        return out.slice(0, 80);
+    } catch (e) { return []; }
+}
+
+/* Site access + toolbar state. Vivaldi 8.2+ on Android lets the user switch
+ * an extension off per site, and before 8.3 the MV3 runtime host-permission
+ * prompt never showed (VAB-13594, fixed in 8.3). Without <all_urls> the
+ * gesture content script can't run, so Setup reports it and can ask again. */
+function hasAllSites() {
+    return new Promise(r => {
+        if (!chrome.permissions || !chrome.permissions.contains) return r(null);
+        chrome.permissions.contains({ origins: ['<all_urls>'] }, ok => { void chrome.runtime.lastError; r(!!ok); });
+    });
+}
+function requestAllSites() {
+    return new Promise(r => {
+        if (!chrome.permissions || !chrome.permissions.request) return r({ ok: false, error: 'no runtime permission API' });
+        try {
+            chrome.permissions.request({ origins: ['<all_urls>'] }, ok => {
+                const err = chrome.runtime.lastError;
+                r(err ? { ok: false, error: err.message || String(err) } : { ok: !!ok });
+            });
+        } catch (e) { r({ ok: false, error: String((e && e.message) || e) }); }
+    });
+}
+/* action.getUserSettings().isOnToolbar — Vivaldi 8.4 (VB-125404), Chrome 91+. */
+async function isOnToolbar() {
+    try {
+        if (!chrome.action || !chrome.action.getUserSettings) return null;
+        const u = await chrome.action.getUserSettings();
+        return u && typeof u.isOnToolbar === 'boolean' ? u.isOnToolbar : null;
+    } catch (e) { return null; }
+}
+function incognitoAllowed() {
+    return new Promise(r => {
+        try {
+            if (!chrome.extension || !chrome.extension.isAllowedIncognitoAccess) return r(null);
+            chrome.extension.isAllowedIncognitoAccess(ok => { void chrome.runtime.lastError; r(!!ok); });
+        } catch (e) { r(null); }
+    });
+}
+function chromiumVersion() {
+    const m = /Chrom(?:e|ium)\/(\d+)/.exec(navigator.userAgent || '');
+    return m ? +m[1] : 0;
 }
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

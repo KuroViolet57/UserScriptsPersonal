@@ -373,6 +373,8 @@ async function renderSettings() {
         <input type="number" id="s-minb" min="0" step="0.5" value="${((s.minSniffBytes || 0) / 1048576).toFixed(1).replace(/\.0$/, '')}"></div>
       <div class="field inline"><label>Fold stream segments<span class="h">Collapse repeated .ts/.m4s URLs into one entry</span></label>
         <input type="checkbox" id="s-collapse" ${s.collapseSegments ? 'checked' : ''}></div>
+      <div class="field inline"><label>Ignore private tabs<span class="h">Otherwise their media is listed but kept in memory only — never written to disk</span></label>
+        <input type="checkbox" id="s-nopriv" ${s.ignorePrivate ? 'checked' : ''}></div>
       <div class="field inline"><label>Max entries per tab</label>
         <input type="number" id="s-max" min="50" max="2000" value="${s.maxPerTab}"></div>
 
@@ -392,6 +394,8 @@ async function renderSettings() {
         <input type="text" id="s-dlpkg" value="${s.downloadPackage || ''}" placeholder="com.example.downloader"></div>
       <div class="field inline"><label>Copy link when sending to an app<span class="h">Backup if the app doesn't open: paste it, or let the app auto-detect it</span></label>
         <input type="checkbox" id="s-dlcopy" ${s.copyOnSend !== false ? 'checked' : ''}></div>
+      <div class="field inline"><label>Ask where to save<span class="h">Browser downloader only. Vivaldi 8.2 always asked; 8.3+ follows this setting</span></label>
+        <input type="checkbox" id="s-saveas" ${s.askWhereToSave ? 'checked' : ''}></div>
 
       <div class="tabhead" style="margin-top:18px">${svg('external', 13)}<span class="tt">EXTERNAL PLAYER</span><span class="rule"></span></div>
       <div class="field inline"><label>Open in player with</label>
@@ -431,6 +435,7 @@ async function renderSettings() {
       <div class="field"><button class="btn d" id="s-clear" data-ico="trash" style="width:100%">Clear all detected media</button></div>
 
       <div class="tabhead" style="margin-top:18px">${svg('search', 13)}<span class="tt">DIAGNOSTICS</span><span class="rule"></span></div>
+      <div class="field" id="s-access"><div class="h">Checking browser access…</div></div>
       <div class="field">
         <div style="display:flex;gap:6px">
           <button class="btn" id="s-timing" data-ico="refresh" style="flex:1">Load timing</button>
@@ -464,6 +469,8 @@ async function renderSettings() {
             downloadMethod: $('#s-dlm').value,
             downloadPackage: $('#s-dlpkg').value.trim(),
             copyOnSend: $('#s-dlcopy').checked,
+            askWhereToSave: $('#s-saveas').checked,
+            ignorePrivate: $('#s-nopriv').checked,
             collapseSegments: $('#s-collapse').checked,
             minSniffBytes: Math.round(Math.max(0, +$('#s-minb').value || 0) * 1048576),
             maxPerTab: Math.max(50, Math.min(2000, +$('#s-max').value || 300))
@@ -482,8 +489,9 @@ async function renderSettings() {
         await send({ type: 'clear', tabId: null });
         toast('Cleared'); render();
     };
+    fillAccess();
     const timingText = () => ['userAgent: ' + (navigator.userAgent || '').slice(0, 110)]
-        .concat(loadTimingReport(24)).join('\n');
+        .concat(accessLines).concat(loadTimingReport(24)).join('\n');
     $('#s-timing').onclick = () => {
         const out = $('#s-diagout'); out.style.display = 'block'; out.textContent = timingText();
     };
@@ -492,6 +500,55 @@ async function renderSettings() {
         const text = timingText(); out.textContent = text;
         navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Copy failed'));
     };
+}
+
+/* Site access / private tabs / toolbar pin. Vivaldi 8.2+ Android has per-site
+ * extension exceptions, and its MV3 runtime host-permission prompt only works
+ * from 8.3 (VAB-13594). Without <all_urls> webRequest still sees nothing on
+ * the blocked sites, so say so and offer to ask again. */
+let accessLines = [];
+async function fillAccess() {
+    const box = $('#s-access'); if (!box) return;
+    const all = await new Promise(r => {
+        if (!chrome.permissions || !chrome.permissions.contains) return r(null);
+        chrome.permissions.contains({ origins: ['<all_urls>'] }, ok => { void chrome.runtime.lastError; r(!!ok); });
+    });
+    const priv = await new Promise(r => {
+        try {
+            if (!chrome.extension || !chrome.extension.isAllowedIncognitoAccess) return r(null);
+            chrome.extension.isAllowedIncognitoAccess(ok => { void chrome.runtime.lastError; r(!!ok); });
+        } catch (e) { r(null); }
+    });
+    let pinned = null;
+    try {
+        if (chrome.action && chrome.action.getUserSettings) {
+            const u = await chrome.action.getUserSettings();
+            if (u && typeof u.isOnToolbar === 'boolean') pinned = u.isOnToolbar;
+        }
+    } catch (e) {}
+    accessLines = ['site access <all_urls>: ' + all, 'allowed in private tabs: ' + priv, 'action.isOnToolbar: ' + pinned];
+    box.innerHTML = '';
+    const line = (ok, text) => { const d = document.createElement('div'); d.className = 'h'; d.textContent = (ok ? '✅ ' : '⚠️ ') + text; box.appendChild(d); };
+    if (all === false) {
+        line(false, 'Site access is limited — media on blocked sites is not detected.');
+        const b = document.createElement('button'); b.className = 'btn'; b.style.marginTop = '6px';
+        b.textContent = 'Allow on all sites';
+        b.onclick = () => {
+            if (window.__isPopup) {   // the prompt dismisses the Android popup
+                chrome.tabs.create({ url: chrome.runtime.getURL('media.html') + '#settings' }); window.close(); return;
+            }
+            chrome.permissions.request({ origins: ['<all_urls>'] }, ok => {
+                const err = chrome.runtime.lastError;
+                toast(err ? 'Request failed: ' + (err.message || err) : ok ? 'Granted — reload open pages' : 'Not granted — use the extension’s details page (Site access)');
+                if (ok) fillAccess();
+            });
+        };
+        box.appendChild(b);
+    } else if (all === true) line(true, 'Runs on all sites.');
+    if (priv === false) line(false, 'Not allowed in private tabs (extension details → Allow in Incognito/Private, Vivaldi 8.3+).');
+    else if (priv === true) line(true, 'Allowed in private tabs — their media stays in memory only.');
+    if (pinned === false) line(false, 'Not pinned to the toolbar — pin it from the extensions (puzzle) menu.');
+    else if (pinned === true) line(true, 'Pinned to the toolbar.');
 }
 
 /* Load report from the shared boot watchdog in popup-size.js. */

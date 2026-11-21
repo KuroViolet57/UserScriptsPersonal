@@ -26,8 +26,8 @@ local extensions.
 **One-tap downloads** (open on the phone, then install the downloaded zip from
 the browser's extension screen — thanks to the pinned IDs it updates in place):
 
-- Tab Vault: <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/tab-vault.zip>
-- Media Vault: <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/claude/media-sniffer-userscript-6npriz/dist/media-vault.zip>
+- Tab Vault: <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/ccr-b432f84b-h7f7j6/dist/tab-vault.zip>
+- Media Vault: <https://raw.githubusercontent.com/KuroViolet57/UserScriptsPersonal/ccr-b432f84b-h7f7j6/dist/media-vault.zip>
 
 ## Web apps
 

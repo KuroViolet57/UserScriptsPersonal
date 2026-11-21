@@ -27,7 +27,9 @@ const DEFAULT_SETTINGS = {
     captureClosed: true,
     maxClosedWindows: 50,
     maxClosedTabs: 300,
-    restoreUnloaded: true
+    restoreUnloaded: true,
+    bookmarkParent: 'auto',
+    showPrivate: true
 };
 
 /* ------------------------------ storage ------------------------------ */
@@ -54,7 +56,8 @@ function slimTab(t) {
         groupId: (t.groupId == null ? -1 : t.groupId),
         index: t.index,
         windowId: t.windowId,
-        active: !!t.active
+        active: !!t.active,
+        incognito: !!t.incognito
     };
 }
 
@@ -70,6 +73,10 @@ async function rebuildMirror() {
         const tabs = await chrome.tabs.query({});
         const mirror = {};
         for (const t of tabs) {
+            // Private tabs (Vivaldi 8.3+ lets extensions run in them, VAB-13631)
+            // are never mirrored: the mirror lives on disk, and anything not in
+            // it can't be captured as "closed" either. Private stays private.
+            if (t.incognito) continue;
             const w = mirror[t.windowId] || (mirror[t.windowId] = { id: t.windowId, tabs: [], groups: [] });
             w.tabs.push(slimTab(t));
         }
