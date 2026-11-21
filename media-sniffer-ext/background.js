@@ -300,7 +300,7 @@ async function addItem(tabId, item) {
     const existing = bucket.items.find(x => x.url === item.url || (sk && x.kind === 'stream' && streamKey(x.url) === sk));
     if (existing) {
         if (sk && existing.url !== item.url) existing.url = item.url;   // freshest token
-        existing.ts = Date.now();          // seen again (e.g. by the reloaded page): pageStart must keep it
+        existing.seenAt = Date.now();      // seen again (e.g. by the reloaded page): pageStart keeps it; ts stays "found at" 
         if (item.size && !existing.segKey && (!existing.size || item.size > existing.size)) existing.size = item.size;
         if (item.mime && !existing.mime) existing.mime = item.mime;
         existing.hits = (existing.hits || 1) + 1;
@@ -314,7 +314,7 @@ async function addItem(tabId, item) {
         if (seg) {
             seg.segments = (seg.segments || 1) + 1;
             if (item.size) seg.segBytes = (seg.segBytes || 0) + item.size;
-            seg.ts = Date.now();
+            seg.ts = Date.now(); seg.seenAt = seg.ts;
             markDirty(tabId); badgeSoon(tabId); return;
         }
         item.segKey = key;
@@ -324,6 +324,7 @@ async function addItem(tabId, item) {
     }
 
     item.hits = 1;
+    item.seenAt = item.ts || Date.now();
     bucket.items.push(item);
     const cap = Math.max(50, Math.min(2000, +s.maxPerTab || 300));
     if (bucket.items.length > cap) bucket.items.splice(0, bucket.items.length - cap);
@@ -588,7 +589,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const b = media[tabId];
                 if (b && t0) {
                     const before = b.items.length;
-                    b.items = b.items.filter(i => (i.ts || 0) >= t0);
+                    b.items = b.items.filter(i => (i.seenAt || i.ts || 0) >= t0);
                     if (!b.items.length) dropBucket(tabId);
                     else if (b.items.length !== before) markDirty(tabId);
                     if (b.items.length !== before) updateBadge(tabId);

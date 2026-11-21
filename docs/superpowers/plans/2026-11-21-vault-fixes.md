@@ -108,3 +108,8 @@ Accepted edge cases (registered, on the device checklist):
 - A1 numbered part files under 25 MB each (or of unknown size) still fold into one segment row.
 - A2 pages where content scripts cannot run (Web Store, PDF viewer, chrome://) keep their list on reload; a new URL still clears it.
 - A3 (finding 7) the static-origin rule for the sheet's intent relay comes from Chromium's browser test comment; confirm on the phone (Download with / Open in player from the bottom sheet).
+
+## Recheck 2 (2026-11-21, commit 5ac0466) — reviewer: N1–N4 and #9 fixed; 2 new
+- G Cancel that wakes the worker didn't stop a resumed restore → cancelOpen waits for resumeP first (test G).
+- Playing item jumped to the top → `ts` stays the first-detection time; repeat hits set `seenAt`, which pageStart uses (test "ts stays…").
+- Found while fixing: folded segment rows now also refresh `seenAt` (test "a segment row that keeps receiving segments…" failed before).

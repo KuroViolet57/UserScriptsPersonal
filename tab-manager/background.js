@@ -453,6 +453,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (msg.type === 'openUrls') {
                 sendResponse(await runOpenJob(msg.urls || [], msg.mode || 'batch', msg.windowId));
             } else if (msg.type === 'cancelOpen') {
+                if (resumeP) await resumeP;                         // a restore being resumed is cancelled too
                 if (job) { job.cancelled = true; job = null; }     // stops at once; a new restore may start right away
                 await setJob(null);
                 sendResponse({ ok: true });

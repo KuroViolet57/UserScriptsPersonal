@@ -328,3 +328,42 @@ test('R9: more CDN token parameters are ignored when folding playlists', async (
     await wait(150);
     assert.equal((await mvItems(chrome)).length, 1);
 });
+
+/* ---------------------------- recheck 2 ---------------------------- */
+test('G: Cancel as the message that wakes the worker stops a saved restore', async () => {
+    const m = browserModel();
+    const chrome = makeChrome(m.opts);
+    chrome._stores.local.settings = { batchDelaySec: 0, batchSize: 10 };
+    chrome._stores.session.openJob = { urls: urls(5, 'g'), done: 2, total: 5 };
+    loadScript('tab-manager/background.js', chrome);
+    await sendMsg(chrome, { type: 'cancelOpen' });
+    await wait(300);
+    assert.equal(m.log.filter(e => e[0] === 'create').length, 0);
+    assert.ok(!chrome._stores.session.openJob);
+});
+
+test('ts stays the first-detection time; a repeat hit only updates seenAt', async () => {
+    const { chrome } = await mvBoot();
+    mvHit(chrome, 'https://cdn.example/a.mp4');
+    await until(async () => (await mvItems(chrome)).length === 1);
+    const [first] = await mvItems(chrome);
+    await wait(40);
+    mvHit(chrome, 'https://cdn.example/a.mp4');
+    await wait(60);
+    const [again] = await mvItems(chrome);
+    assert.equal(again.ts, first.ts);
+    assert.ok(again.seenAt > first.ts);
+});
+
+test('a segment row that keeps receiving segments after a reload survives pageStart', async () => {
+    const { chrome } = await mvBoot();
+    mvHit(chrome, 'https://cdn.example/hls/seg-1.ts', 'video/mp2t', { cl: 1e5 });
+    await until(async () => (await mvItems(chrome)).length === 1);
+    await wait(30);
+    const t0 = Date.now();
+    await wait(20);
+    mvHit(chrome, 'https://cdn.example/hls/seg-2.ts', 'video/mp2t', { cl: 1e5 });
+    await wait(60);
+    await sendMsg(chrome, { type: 'pageStart', url: 'https://page.example/watch', timeOrigin: t0 }, { tab: { id: 7 }, frameId: 0 });
+    assert.equal((await mvItems(chrome)).length, 1);
+});
