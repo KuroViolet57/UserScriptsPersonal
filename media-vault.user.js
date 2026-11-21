@@ -8,6 +8,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
+// @grant        GM_listValues
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
 // @grant        GM_registerMenuCommand
@@ -68,6 +69,7 @@
         getValue: typeof GM_getValue === 'function' ? GM_getValue : null,
         setValue: typeof GM_setValue === 'function' ? GM_setValue : null,
         deleteValue: typeof GM_deleteValue === 'function' ? GM_deleteValue : null,
+        listValues: typeof GM_listValues === 'function' ? GM_listValues : null,
         addListener: typeof GM_addValueChangeListener === 'function' ? GM_addValueChangeListener : null,
         removeListener: typeof GM_removeValueChangeListener === 'function' ? GM_removeValueChangeListener : null,
         menu: typeof GM_registerMenuCommand === 'function' ? GM_registerMenuCommand : null,
@@ -245,6 +247,11 @@
         if (!FMP4_EXT.includes(ext)) return false;
         try { return SEG_NAME_RE.test(new URL(url).pathname); } catch (e) { return false; }
     }
+    /* Playlists are re-polled with changing queries (LL-HLS _HLS_msn, tokens):
+     * one row per playlist path. */
+    function streamKey(url) {
+        try { const u = new URL(url); return u.origin + u.pathname; } catch (e) { return String(url).split('?')[0]; }
+    }
     function totalFromRange(cr) { const m = cr && /\/(\d+)\s*$/.exec(cr); return m ? parseInt(m[1], 10) : null; }
 
     /* ================================================================== *
@@ -253,6 +260,7 @@
     const items = [];
     const byUrl = new Map();
     const segs = new Map();
+    const streams = new Map();      // playlist path -> item
     const rawSeen = new Set();      // every raw URL already counted (folded segments too)
     const stats = { net: 0, perf: 0, dom: 0, frame: 0, viaPost: 0, viaStore: 0, probes: 0, probeOk: 0 };
     const framesSeen = new Set();
@@ -262,7 +270,14 @@
     function addItem(rec) {
         const url = rec.url;
         if (!url) return;
-        const ex = byUrl.get(url);
+        let ex = byUrl.get(url);
+        if (!ex && rec.kind === 'stream') {
+            const s0 = streams.get(streamKey(url));
+            if (s0 && byUrl.get(s0.url) === s0) {          // same playlist, new query: keep the newest URL
+                byUrl.delete(s0.url); s0.url = url; byUrl.set(url, s0); s0.ts = Date.now();
+                ex = s0;
+            }
+        }
         if (ex) {
             let ch = false;
             if (rec.size && !ex.segKey && (!ex.size || rec.size > ex.size)) { ex.size = rec.size; ch = true; }
@@ -296,6 +311,7 @@
         }
         items.push(it);
         byUrl.set(url, it);
+        if (it.kind === 'stream') streams.set(streamKey(url), it);
         stats[it.frame ? 'frame' : it.src] = (stats[it.frame ? 'frame' : it.src] || 0) + 1;
         const cap = Math.max(50, Math.min(2000, +S.maxPerTab || 300));
         if (items.length > cap) {
@@ -315,7 +331,7 @@
         changed();
     }
     function clearItems() {
-        items.length = 0; byUrl.clear(); segs.clear(); rawSeen.clear(); domSeen.clear();
+        items.length = 0; byUrl.clear(); segs.clear(); streams.clear(); rawSeen.clear(); domSeen.clear();
         changed();
     }
     /* Setup's "ignore media smaller than" floor — list, launcher count and
@@ -494,6 +510,23 @@
         if (d.type === 'gesture' && Date.now() - lastGestureMsg > 800) { lastGestureMsg = Date.now(); fireGesture(); return true; }
         return false;
     }
+    function framesCount() { try { return window.frames.length; } catch (e) { return 0; } }
+    function helloDelay(n, frames, lastFrames) {
+        if (n < 10) return { hello: true, next: 2000 };
+        return { hello: frames !== lastFrames && frames > 0, next: 10000 };
+    }
+    /* Frame hand-over keys (mvf_<page>, mvf_o_<origin>) of pages long gone. */
+    function cleanFrameKeys() {
+        if (!A.listValues) return;
+        try {
+            const t = Date.now();
+            (A.listValues() || []).forEach(k => {
+                if (k.indexOf('mvf_') !== 0 || k === 'mvf_' + PAGE_ID) return;
+                const v = gv(k, null);
+                if (!v || typeof v !== 'object' || !(t - (v.ts || 0) < 3600000)) dv(k);
+            });
+        } catch (e) {}
+    }
     function helloFrames() {
         const msg = { __mv: NS, v: 1, type: 'hello', pageId: IS_TOP ? PAGE_ID : knownPageId };
         if (!msg.pageId) return;
@@ -522,9 +555,18 @@
             onValue('mvf_' + PAGE_ID, handler);
             onValue('mvf_o_' + location.origin, handler);
             window.addEventListener('pagehide', () => { dv('mvf_' + PAGE_ID); });
-            let n = 0;
-            const tick = () => { helloFrames(); n++; setTimeout(tick, n < 10 ? 2000 : 10000); };
+            // Greet frames 10 times (every 2 s), then only when the number of
+            // frames changes (checked every 10 s, no messages otherwise).
+            let n = 0, lastFrames = -1;
+            const tick = () => {
+                const f = framesCount();
+                const d = helloDelay(n, f, lastFrames);
+                if (d.hello) { helloFrames(); lastFrames = f; }
+                n++;
+                setTimeout(tick, d.next);
+            };
             setTimeout(tick, 300);
+            setTimeout(cleanFrameKeys, 4000);
         } else {
             try { window.top.postMessage({ __mv: NS, v: 1, type: 'hi' }, '*'); } catch (e) {}
         }
@@ -588,8 +630,15 @@
                             if (done || x.readyState < 2) return;
                             done = true;
                             try {
-                                emit({ url: x.responseURL || String(x.__mvu || ''), ct: x.getResponseHeader('content-type'),
-                                       cl: x.getResponseHeader('content-length'), cr: x.getResponseHeader('content-range'), st: x.status });
+                                // content-type is always readable; reading other headers of a
+                                // cross-origin response that does not expose them makes Chromium
+                                // log an "unsafe header" error, so only media-looking ones.
+                                const u = x.responseURL || String(x.__mvu || '');
+                                const ct = x.getResponseHeader('content-type') || '';
+                                const mediaish = /^(video|audio)\/|mpegurl|dash\+xml|octet-stream|binary|download/i.test(ct) ||
+                                    /\.(m3u8|mpd|mp4|m4v|m4s|m4a|webm|mkv|mov|ts|mp3|aac|ogg|opus|flac|wav)(?:[?#]|$)/i.test(u);
+                                if (!mediaish) { emit({ url: u, ct, st: x.status }); return; }
+                                emit({ url: u, ct, cl: x.getResponseHeader('content-length'), cr: x.getResponseHeader('content-range'), st: x.status });
                             } catch (e) {}
                         });
                     } catch (e) {}
@@ -755,8 +804,15 @@
      * ================================================================== */
     /* Android VIEW intent. Broad type (video/* / audio/*) is what actually
      * resolves on real devices; an exact codec MIME often matches nothing. */
+    /* Android package names only (letters, digits, _ and dots, 2+ parts): a ';'
+     * in a typed or stored package would add intent parameters. */
+    function safePkg(p) {
+        p = String(p || '').trim();
+        return /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(p) ? p : '';
+    }
     function buildIntent(url, pkg, kind, title, opt) {
         opt = opt || {};
+        pkg = safePkg(pkg);
         let it;
         const m = opt.formB && /^([a-z][a-z0-9+.-]*):\/\/(.*)$/i.exec(url);
         if (m) it = 'intent://' + m[2] + '#Intent;scheme=' + m[1] + ';action=android.intent.action.VIEW;';
@@ -917,6 +973,17 @@
     /* ================================================================== *
      *  Debug console (eruda) — fetched via GM_xmlhttpRequest so CSP can't block it
      * ================================================================== */
+    /* The debug console is eruda 3.4.3, pinned and hash-checked (the same
+     * SHA-384 as eruda.js in the npm package eruda-3.4.3.tgz). */
+    const ERUDA_URL = 'https://cdn.jsdelivr.net/npm/eruda@3.4.3/eruda.js';
+    const ERUDA_SRI = 'sha384-weDBY9jeIj4NqaiZF9f6PMAMMY4lIu+0CAI+TjBIE73RctCQOxDoEHltYnstRszI';
+    async function sriOk(text) {
+        try {
+            const buf = await crypto.subtle.digest('SHA-384', new TextEncoder().encode(text));
+            let bin = ''; new Uint8Array(buf).forEach(b => { bin += String.fromCharCode(b); });
+            return 'sha384-' + btoa(bin) === ERUDA_SRI;
+        } catch (e) { return false; }
+    }
     function toggleConsole() {
         const w = window;
         const init = () => { try { w.eruda.init(); toast('Console open — tap its gear button'); } catch (e) { toast('Console init failed'); } };
@@ -928,7 +995,8 @@
         const tag = () => {
             try {
                 const s = document.createElement('script');
-                s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+                s.src = ERUDA_URL;
+                s.integrity = ERUDA_SRI; s.crossOrigin = 'anonymous';
                 s.onload = () => { if (!w.eruda && PW.eruda) w.eruda = PW.eruda; init(); };
                 s.onerror = () => toast('Could not load the console (blocked / offline)');
                 (document.body || document.documentElement).appendChild(s);
@@ -937,8 +1005,13 @@
         if (!A.xhr) { tag(); return; }
         try {
             A.xhr({
-                method: 'GET', url: 'https://cdn.jsdelivr.net/npm/eruda', timeout: 30000,
-                onload(r) { try { (0, eval)(r.responseText); init(); } catch (e) { tag(); } },   // eslint-disable-line no-eval
+                method: 'GET', url: ERUDA_URL, timeout: 30000,
+                onload(r) {
+                    sriOk(r.responseText).then(ok => {
+                        if (!ok) { toast('Console file did not match its pinned hash — not loaded'); return; }
+                        try { (0, eval)(r.responseText); init(); } catch (e) { tag(); }   // eslint-disable-line no-eval
+                    });
+                },
                 onerror: tag, ontimeout: tag
             });
         } catch (e) { tag(); }
@@ -2007,9 +2080,14 @@ pre.diag{background:var(--bg2);border:1px solid var(--line);border-radius:10px;p
      * ================================================================== */
     if (!IS_TOP && !S.scanFrames) return;
 
-    try { window.__MV = { items, settings: () => S, set: o => setSettings(Object.assign({}, S, o)), visible: visibleItems,
-                          stats, report, addItem, openSheet, openPanel, scan, diag: diagText,
-                          env: { IS_TOP, IS_ANDROID, IS_XBROWSER, HANDLER, PAGE_ID } }; } catch (e) {}
+    // Debug handle for the page console, only when turned on (GM value
+    // debugApi): where a manager shares `window` with the page, any site could
+    // otherwise change settings for every site or inject list items.
+    if (gv('debugApi', false)) {
+        try { window.__MV = { items, settings: () => S, set: o => setSettings(Object.assign({}, S, o)), visible: visibleItems,
+                              stats, report, addItem, openSheet, openPanel, scan, diag: diagText,
+                              env: { IS_TOP, IS_ANDROID, IS_XBROWSER, HANDLER, PAGE_ID } }; } catch (e) {}
+    }
 
     if (S.captureNetwork) installNet();
     if (S.perfObserver) installPerf();
@@ -2035,7 +2113,9 @@ pre.diag{background:var(--bg2);border:1px solid var(--line);border-radius:10px;p
     }, true));
 
     try {
-        new MutationObserver(scheduleScan).observe(document.documentElement || document,
+        new MutationObserver(() => {
+            if (IS_TOP || document.getElementsByTagName('video').length || document.getElementsByTagName('audio').length) scheduleScan();
+        }).observe(document.documentElement || document,
             { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     } catch (e) {}
 
@@ -2052,7 +2132,7 @@ pre.diag{background:var(--bg2);border:1px solid var(--line);border-radius:10px;p
                 onMove();
             }, true);
         }
-        setInterval(() => {
+        const loop = () => setInterval(() => {
             scan();
             if (IS_TOP) {
                 repositionAll();
@@ -2060,6 +2140,15 @@ pre.diag{background:var(--bg2);border:1px solid var(--line);border-radius:10px;p
                 if (sheetOpen && section === 'tab') renderList();     // ages, in place
             }
         }, 1500);
+        // Frames (ads, widgets) only start the scan loop once they hold media.
+        const hasMedia = () => document.getElementsByTagName('video').length + document.getElementsByTagName('audio').length > 0;
+        if (IS_TOP || hasMedia()) { loop(); return; }
+        let started = false;
+        const start = () => { if (!started) { started = true; scan(); loop(); } };
+        ['loadstart', 'play'].forEach(ty => document.addEventListener(ty, e => {
+            const el = e.target; if (el && (el.tagName === 'VIDEO' || el.tagName === 'AUDIO')) start();
+        }, true));
+        const idle = setInterval(() => { if (started) clearInterval(idle); else if (hasMedia()) { clearInterval(idle); start(); } }, 5000);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
     else boot();

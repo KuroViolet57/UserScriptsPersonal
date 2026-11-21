@@ -57,7 +57,7 @@ export function gmWorld({ lag = 40 } = {}) {
 /** Source with a test-only hook appended before the boot call (never shipped). */
 function hooked(file, hookCode) {
     const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
-    const marker = file.includes('tab-vault') ? '    boot().catch(' : null;
+    const marker = file.includes('tab-vault') ? '    boot().catch(' : (file.includes('media-vault') ? '    if (S.captureNetwork) installNet();' : null);
     if (!marker || src.split(marker).length !== 2) throw new Error('hook marker not found once in ' + file);
     return src.replace(marker, '    if (typeof __TEST_HOOK__ === "function") __TEST_HOOK__(' + hookCode + ');\n' + marker);
 }
@@ -85,6 +85,29 @@ export async function openTabVaultTab(world, { url = 'https://site.example/page'
     await wait(30);
     const close = () => { tab.alive = false; w.close(); };
     return { tab, w, dom, hook, errors, close };
+}
+
+const MV_HOOK = `{
+    items, addItem, buildIntent, makeHooks, helloDelay, sriOk, streamKey, report,
+    settings: () => S
+}`;
+
+export async function openMediaVaultTab(world, { url = 'https://site.example/watch', name = 'mv', gm = {} } = {}) {
+    const tab = world.makeTab(name);
+    for (const k in gm) tab.cache.set(k, clone(gm[k]));
+    const dom = new JSDOM('<!doctype html><html><head><title>' + name + '</title></head><body><p>x</p></body></html>',
+        { url, runScripts: 'outside-only', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(w, tab.api, { GM_xmlhttpRequest: () => {}, GM_download: () => {}, GM_unregisterMenuCommand: () => {} });
+    w.unsafeWindow = w;
+    if (!w.crypto || !w.crypto.subtle) Object.defineProperty(w, 'crypto', { value: globalThis.crypto, configurable: true });
+    let hook = null;
+    w.__TEST_HOOK__ = h => { hook = h; };
+    const errors = [];
+    w.addEventListener('error', e => errors.push(e.message));
+    w.eval(hooked('media-vault.user.js', MV_HOOK));
+    await wait(30);
+    return { tab, w, dom, hook, errors, close: () => { tab.alive = false; w.close(); } };
 }
 
 export { wait };
