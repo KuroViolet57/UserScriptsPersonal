@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tab Vault (userscript)
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.0.0
+// @version      1.1.0
 // @description  Tab Vault as a userscript: approximate live tab list across all sites (shared GM storage + heartbeat, Tampermonkey's tab API when present), remote close/focus, Tab Vault groups, closed-tab capture, a page history log with day/time-of-day filters, saved sessions with batched restore, bookmarks.html / JSON export compatible with the Tab Vault extension, a corner launcher and multi-finger gestures.
 // @author       KuroViolet57
 // @match        *://*/*
@@ -55,7 +55,7 @@
     'use strict';
     if (window.top !== window.self) return;   // @noframes, belt and braces
 
-    const VERSION = '1.0.0';
+    const VERSION = '1.1.0';
 
     /* ===================================================================== *
      *  GM compatibility layer (every API feature-detected)

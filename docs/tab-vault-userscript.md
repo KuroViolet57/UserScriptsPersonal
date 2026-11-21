@@ -52,12 +52,20 @@ registry from any tab. That's the same trick Tab Saver used, done more carefully
   cross-site navigation and is never copied into a duplicated tab. Otherwise it
   lives in `sessionStorage`, which survives reloads and same-site navigation. If
   a duplicated tab shares an id with its original, the two notice and split.
-- Each tab writes its entry when it loads, on SPA URL or title changes, when it
-  becomes visible or hidden, and as a **heartbeat** (default every 20 s while
-  visible, 3× slower in the background). Writes are debounced, so a tab writes
-  about once per heartbeat. Entries are capped at 250 tabs.
-- Other tabs see the change at once through `GM_addValueChangeListener`. Without
-  it, the open manager polls every few seconds.
+- Each tab writes **its own entry** (`live.<tab id>`) when it loads, on SPA URL
+  or title changes, when it becomes visible or hidden, and as a **heartbeat**
+  (default every 20 s while visible, 3× slower in the background). No tab ever
+  rewrites another tab's entry, so a closing tab's mark can't be lost. Entries
+  are capped at 250 tabs. (1.0.0 kept every tab in one shared `live` value;
+  1.1.0 still reads it while old tabs are around, and removes it.)
+- Real changes (a tab registers, navigates, closes, or a sweep removes one)
+  bump a small `liveRev` value; other tabs hear it at once through
+  `GM_addValueChangeListener`. A plain heartbeat tells nobody. Without the
+  listener, the open manager polls every few seconds.
+- Closed detection runs in the visible tab, and in one background tab at a
+  time (a short lease), so tabs don't overwrite each other's Closed edits.
+- The History log is written at once for a new visit; title and icon updates
+  are batched (10 s) and skipped when nothing changed.
 - Row badges: **this tab**, **● active** (visible and heard from recently),
   **● open**, or *last heard 12m ago* (probably asleep in the background).
   **TM ✓** means Tampermonkey confirms the tab is open.

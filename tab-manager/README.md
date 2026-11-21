@@ -167,6 +167,26 @@ button reloads every unpacked extension from disk.
 - A stale `manager.css` left in the folder from before v1.12 is harmless — the
   styles now live inside `manager.html`.
 
+## What changed in 1.14.0
+
+- **Closed tabs are never lost in a bulk close.** Every change to the closed
+  lists (captures, Forget, Clear, Import) runs through one queue in the
+  background worker; before, closing 10 tabs at once could keep only one.
+- **Reopen window / Restore group / Open as group / New window** run in the
+  worker, so the toolbar popup closing (when the new window takes focus) no
+  longer stops them after the first tab. Each restored tab is grouped, then
+  unloaded, before the next one is created.
+- **Batched restores resume** after the worker restarts (the URLs and progress
+  are saved after every tab); an old stuck progress bar clears itself.
+- **Import** checks each entry, keeps lists newest first and within the Setup
+  limits, and says how many older closed entries it skipped.
+- **Open and Groups update live** while the manager is open; typing in search
+  no longer shows rows twice; a batch delay of 0 s is kept.
+- The in-page sheet lives in a closed shadow root (site CSS can't hide it),
+  and `manager.html` is only reachable through the per-session dynamic URL.
+- Lighter: the tab mirror is kept in memory (`storage.session`), without
+  `data:` favicons, and title-only changes are batched.
+
 ## Vivaldi 8.3 / 8.4 notes (Tab Vault 1.13.0)
 
 What changed in Vivaldi since 1.12.1, and what Tab Vault does about it:

@@ -35,8 +35,8 @@ updates itself from then on.
 
 | Extension | Description | Docs |
 | --- | ----------- | ---- |
-| [`tab-manager/`](tab-manager/) | **Tab Vault 1.13.0**: tab, group and window manager. Live tab list, real tab groups, saved sessions, browsing history, and automatic capture of closed windows and tabs so you can always reopen them. | [readme](tab-manager/README.md) |
-| [`media-sniffer-ext/`](media-sniffer-ext/) | **Media Vault 1.6.0**: the media sniffer as an extension. Uses webRequest-level detection (any frame, any format, based on Content-Type), size and format filters, segment folding, an on-video button with an in-page player, and real `chrome.downloads` downloads. | [readme](media-sniffer-ext/README.md) |
+| [`tab-manager/`](tab-manager/) | **Tab Vault 1.14.0**: tab, group and window manager. Live tab list, real tab groups, saved sessions, browsing history, and automatic capture of closed windows and tabs so you can always reopen them. | [readme](tab-manager/README.md) |
+| [`media-sniffer-ext/`](media-sniffer-ext/) | **Media Vault 1.7.0**: the media sniffer as an extension. Uses webRequest-level detection (any frame, any format, based on Content-Type), size and format filters, segment folding, an on-video button with an in-page player, and real `chrome.downloads` downloads. | [readme](media-sniffer-ext/README.md) |
 
 Both are Manifest V3. Load them unpacked (or from a zip) in any Chromium
 browser that allows local extensions. **What changed for Vivaldi 8.3 / 8.4**

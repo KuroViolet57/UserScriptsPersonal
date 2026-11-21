@@ -185,8 +185,9 @@ The **Diagnostics** tab, also in the menu, shows:
   GM storage;
 - the size-probe counters, and the last download path and intent.
 
-There are buttons to **Copy** the report, open the **Debug console** (eruda,
-fetched with `GM_xmlhttpRequest` so page CSP can't block it), and run **Test
+There are buttons to **Copy** the report, open the **Debug console** (eruda
+3.4.3, fetched with `GM_xmlhttpRequest` so page CSP can't block it, and run only
+if its SHA-384 matches the pinned hash), and run **Test
 "Open in player"**. That test fires five intent variants (package + `video/*`,
 `intent://` form, system chooser, exact MIME, no type) and can make the
 `intent://` form the default.
@@ -219,6 +220,15 @@ The keys match the extension where they exist: `buttonOn`, `buttonSize`,
 Settings are stored with `GM_setValue`, or in `localStorage` when the manager
 has no storage API. When `GM_addValueChangeListener` exists, settings sync live
 between open tabs.
+
+## Debug handle
+
+`window.__MV` (items, settings, addItem, scan, diag) is only set when the GM
+value `debugApi` is `true` (set it in the userscript manager's storage editor).
+Where a manager shares `window` with the page, any site could otherwise change
+settings for every site or inject list items. Package names for players and
+download apps are checked (letters, digits, `_` and dots) before they go into an
+intent.
 
 ## Limitations
 

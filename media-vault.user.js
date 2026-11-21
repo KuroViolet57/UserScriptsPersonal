@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Media Vault (userscript)
 // @namespace    https://github.com/KuroViolet57/UserScriptsPersonal
-// @version      1.0.0
+// @version      1.1.0
 // @description  Media Vault as a userscript: detects video / audio / HLS-DASH streams from fetch/XHR response headers, the Performance timeline, <video>/<audio>/<source> elements and iframes; folds segment floods; lists them in a bottom sheet with search, type / format / size filters and bulk actions; adds an on-video button with a preview player; downloads via the manager (Referer), 1DM / ADM / any Android app, or opens in an external player.
 // @author       KuroViolet57
 // @match        *://*/*
@@ -52,7 +52,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '1.0.0';
+    const VERSION = '1.1.0';
     const NS = 'mv-us-1';                       // message namespace
 
     let IS_TOP = true;

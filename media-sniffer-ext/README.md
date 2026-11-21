@@ -21,8 +21,11 @@ every response the browser receives, no matter who asked for it:
 | File sizes (needed extra HEAD probes) | Read from response headers; `Content-Range` totals for 206 partials |
 | Hundreds of `.ts`/`.m4s` segment requests flooding the list | **Folded** into one entry with a segment count + accumulated bytes |
 
-Downloads use **`chrome.downloads`** — the browser's real download manager, no
-Referer/CORS tricks needed.
+Downloads use **`chrome.downloads`** — the browser's real download manager. It
+cannot send a Referer (its headers are limited to what XMLHttpRequest allows),
+so a host that only serves its own pages answers 401/403: Media Vault then
+shows a notice on the page pointing to **Download with** 1DM / ADM or **Open in
+player**.
 
 ## What's inside
 
@@ -64,6 +67,25 @@ exempt since their size can't be known.
    folder, Load unpacked from it on `vivaldi://extensions`, and for updates
    extract the new zip over that folder and tap **Update**.
 3. Play a video, then open the popup — or tap the button on the video itself.
+
+## What changed in 1.7.0
+
+- **No detections lost when the worker wakes** (several arriving at once used
+  to overwrite each other), and settings are read once instead of per hit.
+- **Reload clears the tab's list**; a `#hash` change keeps it. Lists from the
+  previous browser session are dropped at startup.
+- **Stored per tab**, and only the tabs that changed are written.
+- **Playlists re-polled with new query strings stay one row** (newest URL);
+  extensionless `video/mp2t` / `video/iso.segment` segments and named fMP4
+  segments (`seg-12.mp4`) fold into one row.
+- **Remove** in the bulk bar really removes rows; search and filters no longer
+  re-ask the worker on every keystroke.
+- **Embedded players**: the content script runs in iframes too (their own
+  on-video button; ad frames stay idle until they hold media).
+- Page-found media gets a clean file name with an extension; a 206 response
+  without a known total no longer shows the chunk size; package names are
+  checked before they go into an intent; the popup page is only reachable
+  through the per-session dynamic URL.
 
 ## Vivaldi 8.3 / 8.4 notes (Media Vault 1.6.0)
 
