@@ -184,8 +184,12 @@ button reloads every unpacked extension from disk.
   no longer shows rows twice; a batch delay of 0 s is kept.
 - The in-page sheet lives in a closed shadow root (site CSS can't hide it),
   and `manager.html` is only reachable through the per-session dynamic URL.
-- Lighter: the tab mirror is kept in memory (`storage.session`), without
-  `data:` favicons, and title-only changes are batched.
+- Lighter: the tab mirror and the restore progress are kept in memory
+  (`storage.session`), without `data:` favicons, title-only changes are
+  batched, and pages get settings changes by message instead of a copy of
+  every storage write.
+- Two restores can't run at once (the second is refused), and Cancel stops a
+  restore immediately.
 
 ## Vivaldi 8.3 / 8.4 notes (Tab Vault 1.13.0)
 

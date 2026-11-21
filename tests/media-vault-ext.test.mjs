@@ -42,40 +42,40 @@ test('M1: detections arriving together on a cold worker are all kept (10 runs)',
     }
 });
 
-test('M2: a reload clears the tab list; a hash change does not', async () => {
+test('M2: a new URL clears the tab list; a hash change does not (reloads: see R5)', async () => {
     const { chrome } = await boot();
     hit(chrome, 'https://cdn.example/a.mp4', 'video/mp4');
     await until(async () => (await items(chrome)).length === 1);
     chrome.tabs.onUpdated.fire(7, { status: 'loading', url: 'https://page.example/watch#t=10' }, { id: 7, url: 'https://page.example/watch#t=10' });
     await wait(60);
     assert.equal((await items(chrome)).length, 1, 'hash change cleared the list');
-    chrome.tabs.onUpdated.fire(7, { status: 'loading' }, { id: 7, url: 'https://page.example/watch#t=10' });
+    chrome.tabs.onUpdated.fire(7, { status: 'loading', url: 'https://page.example/other' }, { id: 7, url: 'https://page.example/other' });
     await wait(60);
-    assert.equal((await items(chrome)).length, 0, 'reload did not clear the list');
+    assert.equal((await items(chrome)).length, 0, 'new URL did not clear the list');
 });
 
 test('M3: lists from the previous browser session are dropped at startup', async () => {
-    const { chrome } = await boot({ seed: { 'mv:tab:7': { items: [{ url: 'https://old/x.mp4', kind: 'video', ext: 'mp4' }], updatedAt: 1 } } });
+    const { chrome } = await boot({ sessionSeed: { 'mv:tab:7': { items: [{ url: 'https://old/x.mp4', kind: 'video', ext: 'mp4' }], updatedAt: 1 } } });
     chrome.runtime.onStartup.fire();
     await wait(80);
     assert.equal((await items(chrome)).length, 0);
-    assert.equal(chrome._stores.local['mv:tab:7'], undefined);
+    assert.equal(chrome._stores.session['mv:tab:7'], undefined);
 });
 
 test('M3: the old one-key store (mediaByTab) is read once and split per tab', async () => {
     const { chrome } = await boot({ seed: { mediaByTab: { 8: { items: [{ url: 'https://o/x.mp4', kind: 'video', ext: 'mp4', ts: 1 }], updatedAt: 1 } } } });
     assert.equal((await items(chrome, 8)).length, 1);
-    await wait(1700);
+    await wait(1800);
     assert.equal(chrome._stores.local.mediaByTab, undefined);
-    assert.ok(chrome._stores.local['mv:tab:8']);
+    assert.ok(chrome._stores.session['mv:tab:8']);
 });
 
 test('M3: saving writes only the tab that changed', async () => {
-    const { chrome } = await boot({ seed: { 'mv:tab:8': { items: [{ url: 'https://o/x.mp4', kind: 'video', ext: 'mp4', ts: 1 }], updatedAt: 1 } } });
+    const { chrome } = await boot({ sessionSeed: { 'mv:tab:8': { items: [{ url: 'https://o/x.mp4', kind: 'video', ext: 'mp4', ts: 1 }], updatedAt: 1 } } });
     await items(chrome, 8);
     const keys = [];
-    const origSet = chrome.storage.local.set;
-    chrome.storage.local.set = (o, cb) => { keys.push(...Object.keys(o)); return origSet(o, cb); };
+    const origSet = chrome.storage.session.set;
+    chrome.storage.session.set = (o, cb) => { keys.push(...Object.keys(o)); return origSet(o, cb); };
     hit(chrome, 'https://cdn.example/new.mp4', 'video/mp4');
     await wait(1700);
     assert.ok(keys.includes('mv:tab:7'));

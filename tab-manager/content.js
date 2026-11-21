@@ -26,8 +26,10 @@
     try {
         chrome.storage.local.get({ settings: {} }, o =>
             readCfg(Object.assign({ gesture: 'swipe3up' }, o.settings)));
-        chrome.storage.onChanged.addListener(ch => {
-            if (ch.settings && ch.settings.newValue) readCfg(ch.settings.newValue);
+        // settings changes arrive by message (no storage listener: it would be
+        // sent a copy of every storage write)
+        chrome.runtime.onMessage.addListener(msg => {
+            if (msg && msg.type === 'settingsChanged' && msg.settings) readCfg(msg.settings);
         });
     } catch (e) {}
 

@@ -390,6 +390,13 @@
         }
         const me = selfEntry();
         putLive(TAB_ID, me);
+        if (PER_TAB) {           // our own stale 1.0.0 entry: older tabs would sweep it into Closed
+            const legacy = gv(K.LIVE, {});
+            if (legacy[TAB_ID]) {
+                delete legacy[TAB_ID];
+                if (Object.keys(legacy).length) gset(K.LIVE, legacy); else gdel(K.LIVE);
+            }
+        }
         lastSig = sigOf(me);
         bumpLive();
         lastLiveWrite = t;
@@ -519,36 +526,44 @@
     /* ===================================================================== *
      *  History log (pages seen), newest first
      * ===================================================================== */
-    let lastPageTouch = 0, pageT = null;
+    let lastPageTouch = 0, pageT = null, pagePending = null;
     /* A new visit is logged at once; title/favicon updates are batched (10 s)
      * and skipped when nothing changed: the whole log is one value, and
      * pages with a ticking title rewrote it every 1.5 s. */
     function logPage(newVisit) {
         if (!settings.logPages || excludedUrl(location.href)) return;
         if (!newVisit) {
-            if (!pageT) pageT = setTimeout(() => { pageT = null; logPageNow(false); }, 10000);
+            // remember WHICH page the update is for (an SPA may change URL before it is written)
+            pagePending = { url: location.href, title: String(document.title || '').slice(0, 300), fav: faviconUrl() };
+            if (!pageT) pageT = setTimeout(() => { pageT = null; const p = pagePending; pagePending = null; logPageNow(false, p); }, 10000);
             return;
         }
-        clearTimeout(pageT); pageT = null;
+        flushPageLog();
         logPageNow(true);
     }
-    function flushPageLog() { if (pageT) { clearTimeout(pageT); pageT = null; logPageNow(false); } }
-    function logPageNow(newVisit) {
-        if (!settings.logPages || excludedUrl(location.href)) return;
-        const url = location.href, t = now();
+    function flushPageLog() {
+        clearTimeout(pageT); pageT = null;
+        const p = pagePending; pagePending = null;
+        if (p) logPageNow(false, p);
+    }
+    function logPageNow(newVisit, snap) {
+        const url = snap ? snap.url : location.href, t = now();
+        if (!settings.logPages || excludedUrl(url)) return;
+        const docTitle = snap ? snap.title : String(document.title || '').slice(0, 300);
+        const docFav = snap ? snap.fav : faviconUrl();
         const pages = gv(K.PAGES, []);
         const i = pages.findIndex(p => p && p.url === url);
         if (!newVisit && i === 0) {
-            const cur = pages[0], f0 = faviconUrl();
-            const title = document.title ? String(document.title).slice(0, 300) : cur.title;
+            const cur = pages[0], f0 = docFav;
+            const title = docTitle || cur.title;
             if (cur.title === title && (!f0 || cur.fav === f0) && t - (cur.lastSeen || 0) < 4.5 * 60000) { lastPageTouch = t; return; }
         }
         let e = i >= 0 ? pages.splice(i, 1)[0] : null;
         if (!e) e = { url, title: '', fav: '', firstSeen: t, lastSeen: t, visits: 0 };
         if (newVisit || !e.visits) e.visits = (e.visits || 0) + 1;
         e.lastSeen = t;
-        if (document.title) e.title = String(document.title).slice(0, 300);
-        const f = faviconUrl(); if (f) e.fav = f;
+        if (docTitle) e.title = docTitle;
+        const f = docFav; if (f) e.fav = f;
         pages.unshift(e);
         gset(K.PAGES, pages.slice(0, Math.max(50, settings.maxPages | 0)));
         lastPageTouch = t;

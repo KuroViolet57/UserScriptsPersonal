@@ -155,7 +155,11 @@
         b.className = 'mv-btn';
         b.innerHTML = PLAY;
         b.title = 'Media Vault';
-        b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openOverlay(video); }, true);
+        b.addEventListener('click', e => {
+            e.preventDefault(); e.stopPropagation();
+            if (IS_TOP) openOverlay(video);
+            else { try { video.pause(); } catch (err) {} send({ type: 'showOnTop' }); }   // embedded frame: overlay in the top page
+        }, true);
         document.body.appendChild(b);
         trackedButtons.set(video, b);
         position(video, b);
@@ -464,12 +468,15 @@
         addEventListener('touchcancel', () => { tracking = false; fired = false; seen = 0; }, { passive: true });
     }
 
-    // settings changes (saved from the popup) apply live, no reload needed
-    try {
-        chrome.storage.onChanged.addListener(ch => {
-            if (ch.settings && ch.settings.newValue) Object.assign(settings, ch.settings.newValue);
-        });
-    } catch (e) {}
+    // settings changes (saved from the popup) arrive by message and apply live
+    // (no storage listener: it would receive a copy of every storage write).
+
+    // A new top document (load or reload): the worker drops what it detected
+    // before this document started.
+    if (IS_TOP) {
+        let t0 = 0; try { t0 = performance.timeOrigin || 0; } catch (e) {}
+        send({ type: 'pageStart', url: location.href, timeOrigin: t0 || (Date.now() - (performance.now ? performance.now() : 0)) });
+    }
 
     /* ------------------------------- boot -------------------------------
      * Embedded frames (players inside iframes) report their own <video>s and
@@ -500,6 +507,7 @@
     // popup asks us to open the overlay ("show on page")
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg && msg.type === 'mediaCleared') { reported.clear(); setTimeout(scan, 50); return; }   // every frame
+        if (msg && msg.type === 'settingsChanged' && msg.settings && typeof msg.settings === 'object') { Object.assign(settings, msg.settings); return; }
         if (!IS_TOP) return;
         if (msg && msg.type === 'mvNotice' && typeof msg.text === 'string') { toast(msg.text.slice(0, 240), 7000); sendResponse({ ok: true }); }
         else if (msg && msg.type === 'openOverlay') { openOverlay2(null); sendResponse({ ok: true }); }
@@ -514,9 +522,13 @@
     // The bottom-sheet iframe (our own origin) asks the page to launch an app.
     // The tap inside the iframe also activated this frame, which Android needs.
     if (IS_TOP) window.addEventListener('message', e => {
-        let ours = '';
-        try { ours = chrome.runtime.getURL('').replace(/\/$/, ''); } catch (err) {}
-        if (!ours || e.origin !== ours) return;
+        // The framed media.html is opened through the dynamic URL but runs at the
+        // static extension origin (Chromium redirects the GUID URL to it), so
+        // accept both.
+        const ok = [];
+        try { ok.push(chrome.runtime.getURL('').replace(/\/$/, '')); } catch (err) {}
+        try { if (chrome.runtime.id) ok.push('chrome-extension://' + chrome.runtime.id); } catch (err) {}
+        if (!ok.includes(e.origin)) return;
         const d = e.data;
         if (d && d.type === 'mv-intent' && /^intent:/.test(d.intent || '')) location.href = d.intent;
     });

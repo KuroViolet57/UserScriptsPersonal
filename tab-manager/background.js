@@ -281,6 +281,19 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 });
 
 chrome.runtime.onStartup.addListener(() => rebuildMirror());
+
+/* Content scripts get settings changes by message: a storage.onChanged
+ * listener in every page would be sent a copy of every storage write. */
+chrome.storage.onChanged.addListener(async (ch, area) => {
+    if (area !== 'local' || !ch[K.SETTINGS]) return;
+    try {
+        const s = Object.assign({}, DEFAULT_SETTINGS, ch[K.SETTINGS].newValue || {});
+        for (const t of await chrome.tabs.query({})) {
+            if (t.id == null) continue;
+            try { const p = chrome.tabs.sendMessage(t.id, { type: 'settingsChanged', settings: s }); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+        }
+    } catch (e) {}
+});
 chrome.runtime.onInstalled.addListener(() => rebuildMirror());
 
 /* --------------------------- batched opening ---------------------------
@@ -310,50 +323,64 @@ async function liveWindowId(id) {
     try { await chrome.windows.get(id); return id; } catch (e) { return undefined; }
 }
 
+/* The restore job record lives in storage.session: it survives worker
+ * restarts, and pages are not sent a copy every time it changes. */
+const JOB_AREA = (chrome.storage && chrome.storage.session) ? chrome.storage.session : chrome.storage.local;
+function getJob() { return new Promise(res => JOB_AREA.get({ [K.OPEN_JOB]: null }, o => res(o ? o[K.OPEN_JOB] : null))); }
+function setJob(v) { return new Promise(res => JOB_AREA.set({ [K.OPEN_JOB]: v }, () => res())); }
+
 async function runOpenJob(urls, mode, windowId) {
-    if (job) return { ok: false, error: 'A restore is already running' };
-    const unload = await unloadOn();
-
     if (mode === 'window') return openSetNow({ tabs: urls.map(url => ({ url })), newWindow: true });
-
     if (mode === 'all') {
+        const unload = await unloadOn();
         for (const u of urls) await makeTab({ url: u, windowId }, unload);
         return { ok: true, opened: urls.length };
     }
-
-    startBatch(urls, 0, windowId);
+    if (job) return { ok: false, error: 'A restore is already running' };
+    startBatch(urls, 0, windowId);            // reserves `job` before any await
     return { ok: true, started: true, total: urls.length };
 }
 
 /* Batched restore. The URLs and progress are saved after every tab, so a
  * worker that is stopped mid-job resumes at the next start (resumeJob). */
-async function startBatch(urls, done, windowId) {
-    const s = await getSettings();
-    const unload = await unloadOn();
-    job = { urls, total: urls.length, done, windowId, cancelled: false };
-    const batch = Math.max(1, s.batchSize | 0);
-    const delay = Math.max(0, Math.min(20, +s.batchDelaySec || 0)) * 1000;
-    const save = () => set(K.OPEN_JOB, job ? { urls: job.urls, done: job.done, total: job.total, windowId: job.windowId } : null);
-    await save();
-    const step = async () => {
-        if (!job || job.cancelled) { job = null; await set(K.OPEN_JOB, null); return; }
-        const end = Math.min(job.done + batch, urls.length);
-        while (job && !job.cancelled && job.done < end) {
-            await makeTab({ url: urls[job.done], windowId: job.windowId }, unload);
-            job.done++;
-            await save();
-        }
-        if (job && !job.cancelled && job.done < urls.length) setTimeout(step, delay);
-        else { job = null; await set(K.OPEN_JOB, null); }
-    };
-    step();
+function startBatch(urls, done, windowId) {
+    // Reserved synchronously: a second restore asked for in the same moment
+    // sees `job` and is refused instead of sharing its progress counter.
+    const my = job = { urls, total: urls.length, done, windowId, cancelled: false };
+    const live = () => job === my && !my.cancelled;
+    const save = () => live() ? setJob({ urls: my.urls, done: my.done, total: my.total, windowId: my.windowId }) : Promise.resolve();
+    (async () => {
+        const s = await getSettings();
+        const unload = await unloadOn();
+        const batch = Math.max(1, s.batchSize | 0);
+        const delay = Math.max(0, Math.min(20, +s.batchDelaySec || 0)) * 1000;
+        const finish = async () => { if (job === my) { job = null; await setJob(null); } };
+        const step = async () => {
+            if (!live()) return finish();
+            const end = Math.min(my.done + batch, urls.length);
+            while (live() && my.done < end) {
+                await makeTab({ url: urls[my.done], windowId: my.windowId }, unload);
+                my.done++;
+                await save();
+            }
+            if (live() && my.done < urls.length) setTimeout(step, delay);
+            else await finish();
+        };
+        if (my.windowId != null) my.windowId = await liveWindowId(my.windowId);
+        await save();
+        step();
+    })();
 }
 async function resumeJob() {
     if (job) return;
-    const j = await get(K.OPEN_JOB, null);
+    const reserve = job = { urls: [], total: 0, done: 0, cancelled: false, reserving: true };   // hold the slot while reading
+    let j = await getJob();
+    if (!j) { const old = await get(K.OPEN_JOB, null); if (old) { j = old; await set(K.OPEN_JOB, null); } }   // 1.13.0 kept it in local
+    if (job !== reserve) return;
+    job = null;
     if (!j) return;
-    if (!Array.isArray(j.urls) || !(j.done < j.urls.length)) { await set(K.OPEN_JOB, null); return; }  // old format or finished
-    startBatch(j.urls, j.done | 0, await liveWindowId(j.windowId));
+    if (!Array.isArray(j.urls) || !(j.done < j.urls.length)) { await setJob(null); return; }  // old format or finished
+    startBatch(j.urls, j.done | 0, j.windowId);
 }
 
 /* Open a set of tabs, here or in a new window, grouping as asked:
@@ -392,11 +419,13 @@ async function openSetNow({ tabs, newWindow, groupAll, windowId }) {
 
     let opened = 0, start = 0;
     if (newWindow) {
+        // No silent fallback here: the caller decides (the manager restores in
+        // the current window instead), so nothing is opened twice.
         try {
             const win = await chrome.windows.create({ url: items[0].url });
             winId = win.id; start = 1; opened = 1;
             await addToGroup((win.tabs || [])[0], items[0]);
-        } catch (e) { winId = windowId; }
+        } catch (e) { return { ok: false, noWindow: true, error: 'Could not open a new window: ' + ((e && e.message) || e) }; }
     }
     for (let i = start; i < items.length; i++) {
         const t = await makeTab({ url: items[i].url, windowId: winId }, unload, tab => addToGroup(tab, items[i]));
@@ -420,8 +449,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (msg.type === 'openUrls') {
                 sendResponse(await runOpenJob(msg.urls || [], msg.mode || 'batch', msg.windowId));
             } else if (msg.type === 'cancelOpen') {
-                if (job) job.cancelled = true;
-                await set(K.OPEN_JOB, null);
+                if (job) { job.cancelled = true; job = null; }     // stops at once; a new restore may start right away
+                await setJob(null);
                 sendResponse({ ok: true });
             } else if (msg.type === 'openSet') {
                 sendResponse(await openSetNow(msg));

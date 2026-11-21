@@ -49,8 +49,19 @@ function getSettings() {
     return settingsP;
 }
 chrome.storage.onChanged.addListener((ch, area) => {
-    if (area === 'local' && ch[K.SETTINGS]) settingsP = null;
+    if (area === 'local' && ch[K.SETTINGS]) { settingsP = null; broadcastSettings(ch[K.SETTINGS].newValue); }
 });
+/* Content scripts get settings changes by message: a storage.onChanged
+ * listener in every page would be sent a copy of every storage write. */
+async function broadcastSettings(v) {
+    try {
+        const s = Object.assign({}, DEFAULT_SETTINGS, v || {});
+        for (const t of await chrome.tabs.query({})) {
+            if (t.id == null) continue;
+            try { const p = chrome.tabs.sendMessage(t.id, { type: 'settingsChanged', settings: s }); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+        }
+    } catch (e) {}
+}
 
 /* Android package names: letters, digits, _ and dots, at least two parts.
  * Anything else (a ';' would add intent parameters) is dropped. */
@@ -144,22 +155,34 @@ function segmentKey(url) {
         return u.origin + u.pathname.replace(/\d+/g, '#');
     } catch (e) { return url.replace(/\d+/g, '#'); }
 }
-function isSegmentUrl(url, ext) {
+/* A response that reports a whole-file size above this is a real file, not a
+ * stream segment (movie_part1.mp4 / ep2.ts must stay separate rows). */
+const SEGMENT_MAX_BYTES = 25e6;
+function isSegmentUrl(url, ext, size) {
+    if (size && size > SEGMENT_MAX_BYTES) return false;
     if (SEGMENT_EXT.includes(ext)) return true;
     if (!FMP4_EXT.includes(ext)) return false;
     try { return SEG_NAME_RE.test(new URL(url).pathname); } catch (e) { return false; }
 }
 /* Playlists are re-polled with changing queries (LL-HLS _HLS_msn, tokens):
- * one row per playlist path. */
+ * one row per playlist path plus its NON-volatile query (?id=A and ?id=B are
+ * different playlists; _HLS_*, token, expires, signature… are dropped). */
+const VOLATILE_Q = /^(_hls_.*|token|tok|expires?|exp|e|st|sig|signature|hdnts|hdntl|hmac|auth|t|ts|time|timestamp|nonce|policy|key-pair-id|x-amz-.*|cb|rnd|_)$/i;
 function streamKey(url) {
-    try { const u = new URL(url); return u.origin + u.pathname; } catch (e) { return url.split('?')[0]; }
+    try {
+        const u = new URL(url);
+        const keep = [...u.searchParams].filter(([k]) => !VOLATILE_Q.test(k)).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+        return u.origin + u.pathname + (keep.length ? '?' + keep.map(([k, v]) => k + '=' + v).join('&') : '');
+    } catch (e) { return url.split('?')[0]; }
 }
 
 /* ---------------------------- media store ---------------------------- */
 /* media: { [tabId]: { items: [...], title, navUrl, private, updatedAt } }
- * Stored one key per tab (mv:tab:<id>) — only changed tabs are rewritten.
- * Private tabs: Vivaldi 8.3+ runs extensions in private tabs (VAB-13631).
- * Their buckets go to chrome.storage.session (memory only) and never to disk. */
+ * Stored one key per tab (mv:tab:<id>) in chrome.storage.session: in memory,
+ * survives worker restarts, never on disk (private tabs included, VAB-13631),
+ * and not copied to content scripts on every write. Lists end with the browser
+ * session anyway (tab ids are per session). Only changed tabs are rewritten.
+ * storage.local only where storage.session is missing. */
 let media = null;                 // in-memory copy; mirrored to storage
 let mediaP = null;                // the one load in flight (concurrent wake-ups share it)
 let saveTimer = null;
@@ -167,6 +190,7 @@ const dirty = new Set();          // tab ids changed since the last save
 const removed = new Set();        // tab ids whose bucket was deleted
 
 const SESSION = (chrome.storage && chrome.storage.session) || null;
+const STORE = SESSION || chrome.storage.local;
 const privateTabs = new Set(), publicTabs = new Set();
 const firstUrl = new Map();       // tab url seen at the first detection (for the hash-change rule)
 async function isPrivateTab(tabId) {
@@ -191,7 +215,7 @@ function loadMedia() {
         if (legacy && typeof legacy === 'object') {          // 1.6.0 kept every tab in one key
             for (const tid in legacy) if (legacy[tid] && Array.isArray(legacy[tid].items)) { m[tid] = legacy[tid]; dirty.add(tid); }
         }
-        for (const k in local) if (k.indexOf(TAB_P) === 0 && local[k] && Array.isArray(local[k].items)) m[k.slice(TAB_P.length)] = local[k];
+        for (const k in local) if (k.indexOf(TAB_P) === 0 && local[k] && Array.isArray(local[k].items)) { m[k.slice(TAB_P.length)] = local[k]; if (STORE !== chrome.storage.local) dirty.add(k.slice(TAB_P.length)); }
         if (SESSION) {
             const ses = await areaGetAll(SESSION);
             const old = ses[K.MEDIA];
@@ -205,7 +229,7 @@ function loadMedia() {
     return mediaP;
 }
 let migrateLegacy = false;
-function markDirty(tabId) { dirty.add(String(tabId)); scheduleSave(); }
+function markDirty(tabId) { dirty.add(String(tabId)); removed.delete(String(tabId)); scheduleSave(); }
 function dropBucket(tabId) {
     if (media && media[tabId]) { delete media[tabId]; removed.add(String(tabId)); dirty.delete(String(tabId)); scheduleSave(); }
 }
@@ -215,20 +239,24 @@ function scheduleSave() {
 }
 function flushSave() {
     saveTimer = null;
-    const disk = {}, mem = {}, gone = [];
+    const out = {}, gone = [];
     for (const tid of dirty) {
         const b = media && media[tid];
         if (!b) continue;
-        (b.private ? mem : disk)[TAB_P + tid] = b;
+        if (!SESSION && b.private) continue;          // private never to disk
+        out[TAB_P + tid] = b;
     }
-    for (const tid of removed) gone.push(TAB_P + tid);
+    for (const tid of removed) if (!(media && media[tid])) gone.push(TAB_P + tid);
     dirty.clear(); removed.clear();
-    if (Object.keys(disk).length) chrome.storage.local.set(disk);
-    if (gone.length) { chrome.storage.local.remove(gone); if (SESSION) try { SESSION.remove(gone); } catch (e) {} }
-    if (SESSION && Object.keys(mem).length) { try { SESSION.set(mem); } catch (e) {} }
+    if (Object.keys(out).length) STORE.set(out);
+    if (gone.length) { try { STORE.remove(gone); } catch (e) {} }
     if (migrateLegacy) {
         migrateLegacy = false;
-        chrome.storage.local.remove(K.MEDIA);
+        const old = [K.MEDIA];
+        chrome.storage.local.get(null, all => {
+            for (const k in (all || {})) if (k.indexOf(TAB_P) === 0 && STORE !== chrome.storage.local) old.push(k);
+            chrome.storage.local.remove(old);
+        });
         if (SESSION) try { SESSION.remove(K.MEDIA); } catch (e) {}
     }
 }
@@ -255,7 +283,7 @@ async function addItem(tabId, item) {
     }
 
     // segment folding
-    if (s.collapseSegments && !item.blob && isSegmentUrl(item.url, item.ext)) {
+    if (s.collapseSegments && !item.blob && isSegmentUrl(item.url, item.ext, item.size)) {
         const key = segmentKey(item.url);
         const seg = bucket.items.find(x => x.segKey === key);
         if (seg) {
@@ -360,7 +388,7 @@ chrome.webRequest.onHeadersReceived.addListener(details => {
         const cr = headerVal(details.responseHeaders, 'content-range');
         const m = cr && /\/(\d+)\s*$/.exec(cr);
         if (m) size = parseInt(m[1], 10);
-        else if (details.statusCode === 206 && !isSegmentUrl(details.url, cls.ext)) size = null;
+        else if (details.statusCode === 206 && !isSegmentUrl(details.url, cls.ext, null)) size = null;
 
         addItem(details.tabId, {
             id: 'n' + details.requestId,
@@ -383,9 +411,11 @@ chrome.tabs.onRemoved.addListener(async tabId => {
     await loadMedia();
     dropBucket(tabId);
 });
-/* A new page in the tab (link, typed URL, or a RELOAD — which sends status
- * "loading" with no url, since the URL did not change) starts a clean list.
- * A hash-only change (#t=10) keeps it. */
+/* A new URL in the tab (link, typed URL) starts a clean list; a hash-only
+ * change (#t=10) keeps it. A RELOAD keeps the URL, and a "loading" status
+ * without a url also comes from iframes navigating, so reloads are detected by
+ * the top frame's content script instead (pageStart, with the new document's
+ * start time: only media detected before it is dropped). */
 const stripHash = u => String(u || '').split('#')[0];
 const navUrls = new Map();
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
@@ -393,10 +423,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
         await loadMedia();
         const b = media[tabId];
         const nowUrl = info.url || (tab && tab.url) || '';
-        const hashOnly = !!info.url && b && b.navUrl && stripHash(b.navUrl) === stripHash(info.url);
-        if (b && !hashOnly) { dropBucket(tabId); updateBadge(tabId); }
-        else if (b) { b.navUrl = nowUrl; markDirty(tabId); }
-        navUrls.set(tabId, nowUrl);
+        if (info.url) {
+            const hashOnly = b && b.navUrl && stripHash(b.navUrl) === stripHash(info.url);
+            if (b && !hashOnly) { dropBucket(tabId); updateBadge(tabId); }
+            else if (b) { b.navUrl = nowUrl; markDirty(tabId); }
+            navUrls.set(tabId, nowUrl);
+        }
     }
     if (tab && media && media[tabId]) {
         if (tab.title) media[tabId].title = tab.title;
@@ -523,6 +555,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 } catch (e) {
                     sendResponse({ ok: false, error: String((e && e.message) || e) });
                 }
+            } else if (msg.type === 'pageStart') {
+                // The top frame's new document: drop what was detected before it began.
+                const tabId = sender.tab && sender.tab.id;
+                if (tabId == null || sender.frameId) { sendResponse({ ok: false }); return; }
+                const t0 = +msg.timeOrigin || 0;
+                const b = media[tabId];
+                if (b && t0) {
+                    const before = b.items.length;
+                    b.items = b.items.filter(i => (i.ts || 0) >= t0);
+                    if (!b.items.length) dropBucket(tabId);
+                    else if (b.items.length !== before) markDirty(tabId);
+                    if (b.items.length !== before) updateBadge(tabId);
+                }
+                if (media[tabId] && typeof msg.url === 'string') media[tabId].navUrl = msg.url;
+                navUrls.set(tabId, typeof msg.url === 'string' ? msg.url : '');
+                sendResponse({ ok: true });
+            } else if (msg.type === 'showOnTop') {
+                // A video button inside an embedded frame: show the overlay in the top page.
+                const tabId = sender.tab && sender.tab.id;
+                if (tabId == null) { sendResponse({ ok: false }); return; }
+                try { await chrome.tabs.sendMessage(tabId, { type: 'openOverlay' }, { frameId: 0 }); sendResponse({ ok: true }); }
+                catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
             } else if (msg.type === 'remove') {
                 // Bulk "Remove" in the list: drop exactly these rows.
                 const byTab = {};

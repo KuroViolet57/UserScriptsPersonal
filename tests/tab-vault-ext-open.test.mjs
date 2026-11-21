@@ -84,9 +84,9 @@ test('T7: a restore interrupted by a worker restart resumes where it stopped', a
     const u = urls(5);
     const { chrome } = await boot(m, {
         settings: { batchDelaySec: 0, batchSize: 10 },
-        openJob: { urls: u, done: 2, total: 5, windowId: 99 }      // window 99 is gone
+        openJob: { urls: u, done: 2, total: 5, windowId: 99 }      // window 99 is gone; 1.13.0 kept the job in local
     });
-    await until(() => chrome._stores.local.openJob === null, 4000);
+    await until(() => m.log.filter(e => e[0] === 'create').length === 3 && chrome._stores.session.openJob === null, 4000);
     const created = m.log.filter(e => e[0] === 'create').map(e => e[2]);
     assert.deepEqual(created, u.slice(2));
     assert.ok(m.log.filter(e => e[0] === 'create').every(e => e[3] == null), 'stale window id must not be used');
@@ -96,7 +96,9 @@ test('T7: an old-format job record (no URLs) is cleared, not shown forever', asy
     const m = browserModel();
     const { chrome } = await boot(m, { openJob: { done: 30, total: 400 } });
     await until(() => chrome._stores.local.openJob === null, 2000);
+    await wait(50);
     assert.equal(chrome._stores.local.openJob, null);
+    assert.ok(!chrome._stores.session.openJob, 'old record must not be resumed');
     assert.equal(m.log.filter(e => e[0] === 'create').length, 0);
 });
 

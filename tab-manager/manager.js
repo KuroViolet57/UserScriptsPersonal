@@ -103,6 +103,11 @@ function avatarFor(t) {
 }
 
 function get(key, def) { return new Promise(r => chrome.storage.local.get({ [key]: def }, o => r(o[key]))); }
+/* The restore job record is in storage.session (worker-owned). */
+function getJob() {
+    const area = (chrome.storage && chrome.storage.session) || chrome.storage.local;
+    return new Promise(r => area.get({ [K.OPEN_JOB]: null }, o => r(o ? o[K.OPEN_JOB] : null)));
+}
 function set(key, val) { return new Promise(r => chrome.storage.local.set({ [key]: val }, () => r())); }
 async function getSettings() { return Object.assign({}, DEFAULT_SETTINGS, await get(K.SETTINGS, {})); }
 function send(msg) { return new Promise(r => chrome.runtime.sendMessage(msg, resp => { void chrome.runtime.lastError; r(resp || {}); })); }
@@ -634,7 +639,8 @@ async function renderClosed() {
         cb.appendChild(mk('Save', () => saveSession(w.tabs, 'Closed window'), '', 'save'));
         cb.appendChild(mk('Forget', async () => {
             state.closedSel.delete(w.id);
-            await closedOp({ op: 'remove', ids: [w.id] }); render();
+            try { await closedOp({ op: 'remove', ids: [w.id] }); } catch (e) { toast('Could not forget it: ' + e.message); }
+            render();
         }, 'd', 'trash'));
         c.appendChild(cb);
         box.appendChild(c);
@@ -648,7 +654,8 @@ async function renderClosed() {
         bar.appendChild(mk('Clear list', async () => {
             if (!await confirmBox('Clear the closed-tabs list?')) return;
             state.closedSel.clear();
-            await closedOp({ op: 'clear', what: 'tabs' }); render();
+            try { await closedOp({ op: 'clear', what: 'tabs' }); } catch (e) { toast('Could not clear the list: ' + e.message); }
+            render();
         }, 'd', 'trash'));
         box.appendChild(bar);
     }
@@ -683,7 +690,8 @@ function closedSelItems() {
 
 async function forgetClosedSelected() {
     if (!await confirmBox(`Forget ${state.closedSel.size} selected entr${state.closedSel.size === 1 ? 'y' : 'ies'}?`)) return;
-    await closedOp({ op: 'remove', ids: [...state.closedSel] });
+    try { await closedOp({ op: 'remove', ids: [...state.closedSel] }); }
+    catch (e) { toast('Could not forget them: ' + e.message); return; }
     state.closedSel.clear();
     render();
 }
@@ -1077,7 +1085,8 @@ async function renderSettings() {
     };
     $('#s-clearclosed').onclick = async () => {
         if (!await confirmBox('Clear all closed windows and tabs?')) return;
-        await closedOp({ op: 'clear', what: 'all' }); render();
+        try { await closedOp({ op: 'clear', what: 'all' }); } catch (e) { toast('Could not clear: ' + e.message); }
+        render();
     };
     $('#s-diag').onclick = async () => {
         const out = $('#s-diagout');
@@ -1451,7 +1460,7 @@ function watchJob() {
     clearInterval(jobTimer);
     $('#jobbar').classList.remove('hidden');
     jobTimer = setInterval(async () => {
-        const j = await get(K.OPEN_JOB, null);
+        const j = await getJob();
         if (!j) {
             clearInterval(jobTimer); $('#jobbar').classList.add('hidden');
             toast('Restore finished'); return;
@@ -1721,5 +1730,5 @@ try {
 } catch (e) {}
 
 paintIcons();
-get(K.OPEN_JOB, null).then(j => { if (j) watchJob(); });
+getJob().then(j => { if (j) watchJob(); });
 render();

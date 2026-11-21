@@ -72,16 +72,21 @@ exempt since their size can't be known.
 
 - **No detections lost when the worker wakes** (several arriving at once used
   to overwrite each other), and settings are read once instead of per hit.
-- **Reload clears the tab's list**; a `#hash` change keeps it. Lists from the
-  previous browser session are dropped at startup.
-- **Stored per tab**, and only the tabs that changed are written.
+- **Reload clears the tab's list**: the page's top frame tells the worker when a
+  new document starts, and only media found before that is dropped (an iframe
+  loading no longer counts as a reload). A new URL clears it too; a `#hash`
+  change keeps it. Lists from the previous browser session are dropped at startup.
+- **Stored per tab in `storage.session`** (memory only, never on disk), and only
+  the tabs that changed are written; pages are no longer sent a copy of every
+  write (settings reach them by message).
 - **Playlists re-polled with new query strings stay one row** (newest URL);
   extensionless `video/mp2t` / `video/iso.segment` segments and named fMP4
   segments (`seg-12.mp4`) fold into one row.
 - **Remove** in the bulk bar really removes rows; search and filters no longer
   re-ask the worker on every keystroke.
-- **Embedded players**: the content script runs in iframes too (their own
-  on-video button; ad frames stay idle until they hold media).
+- **Embedded players**: the content script runs in iframes too. A frame's
+  video gets its own button, which opens the overlay in the top page; frames
+  without media run no 1.5 s scan loop (only a 5 s check for a video).
 - Page-found media gets a clean file name with an extension; a 206 response
   without a known total no longer shows the chunk size; package names are
   checked before they go into an intent; the popup page is only reachable

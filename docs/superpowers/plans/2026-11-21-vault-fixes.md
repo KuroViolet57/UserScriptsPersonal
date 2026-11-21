@@ -81,3 +81,18 @@ test-time source transform (nothing test-only ships).
 - T6 test reaches the new splitTwin hook, so on the old file it fails at "splitTwin is exposed", not on the behaviour itself.
 - Gotchas: fake storage on Windows rounds 1 ms timers up to the clock tick — tests wait for results (until()) instead of fixed sleeps; `until()` must await async checks; jsdom window.top is not redefinable, use a real iframe; bash heredocs mangle long edit scripts — write them as files.
 - Tests: 66 passing (npm test).
+
+## Review (2026-11-21) — fresh review of 89868ea..e522859, report in docs/reviews/2026-11-21-fresh-review-of-fixes.md
+Tests: tests/review-fixes.test.mjs (R1–R12); 16 of 18 failed before the fixes.
+1. Bucket dropped and re-added in one save window lost → markDirty clears it from `removed`; flushSave never removes a key that still has a bucket (R1).
+2. Reopen window twice when windows.create fails → openSetNow returns ok:false, no fallback inside (R2).
+3. Two restores mixing → `job` reserved synchronously in startBatch/resumeJob, each step bound to its own job (R3 ×2).
+4. Cancel → clears `job` at once (R4).
+5. Reload detection → top frame sends pageStart with performance.timeOrigin; only older items dropped; loading-without-url no longer clears (R5 ×3).
+6. Storage copies to content scripts → Media Vault lists and the restore job in storage.session; content scripts get settings by message, no storage.onChanged listener (R6 ×3).
+7. Sheet intent relay → accepts the static extension origin as well as the dynamic one (R7).
+8. Upgrade sweep → a 1.1.0 tab deletes its own entry from the legacy map on register (R8).
+9. Distinct files folding → streams keep non-volatile query params; anything reporting > 25 MB is never a segment (R9 ×2).
+10. Child-frame overlay → the frame's button asks the worker to open the overlay in frame 0 (R10).
+11. closedOp failures → toasts on Forget / Clear / Forget selected / Clear all (R11).
+12. History title → the pending update remembers its URL and is flushed before a new visit (R12).
