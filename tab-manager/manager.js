@@ -870,11 +870,13 @@ async function openTabsGrouped(items, useWindow) {
     const r = await askText('Group name', '', { colors: true });
     if (!r) return;
 
-    const res = await send({
-        type: 'openSet', newWindow: !!useWindow,
+    const ask = nw => send({
+        type: 'openSet', newWindow: nw,
         tabs: urls.map(url => ({ url })),
         groupAll: { title: r.text || '', color: r.color || 'blue' }
     });
+    let res = await ask(!!useWindow);
+    if (!res.ok && res.noWindow) res = await ask(false);   // no windows on this browser: open in this one
     if (!res.ok) { toast(res.error || 'Could not open'); return; }
     if (res.grouped) toast(`Opened ${res.opened} tabs in group “${r.text || 'group'}”`);
     else {

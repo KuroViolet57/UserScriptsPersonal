@@ -96,3 +96,15 @@ Tests: tests/review-fixes.test.mjs (R1–R12); 16 of 18 failed before the fixes.
 10. Child-frame overlay → the frame's button asks the worker to open the overlay in frame 0 (R10).
 11. closedOp failures → toasts on Forget / Clear / Forget selected / Clear all (R11).
 12. History title → the pending update remembers its URL and is flushed before a new visit (R12).
+
+## Recheck 1 (2026-11-21, commit 3e9c3c5) — reviewer: 10 fixed, 1 partial (9), 1 needs a device (7); 5 new
+Tests added to tests/review-fixes.test.mjs (N1–N4, R9 tokens); all 5 failed before the fix.
+- N1 first Restore after idle refused → resumeJob no longer holds the slot; runOpenJob waits for resumeP, then decides.
+- N2 reloaded HLS page lost its playlist row → every dedupe hit refreshes `ts`.
+- N3 big 1.6.0 store → only tabs still open are migrated; the old copy is deleted only after a session write succeeds; a refused write retries with each list cut to its newest 100 items.
+- N4 Open as group with no windows → retries in the current window.
+- 9 (partial) → md5, hash, hdnea, __token__, lsig, wmsAuthSign added to the ignored token params.
+Accepted edge cases (registered, on the device checklist):
+- A1 numbered part files under 25 MB each (or of unknown size) still fold into one segment row.
+- A2 pages where content scripts cannot run (Web Store, PDF viewer, chrome://) keep their list on reload; a new URL still clears it.
+- A3 (finding 7) the static-origin rule for the sheet's intent relay comes from Chromium's browser test comment; confirm on the phone (Download with / Open in player from the bottom sheet).

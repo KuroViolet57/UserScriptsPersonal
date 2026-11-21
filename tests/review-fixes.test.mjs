@@ -264,3 +264,67 @@ test('R12: a pending History title is written for its own page when the URL chan
     assert.equal(one && one.title, 'Final title of one');
     a.close();
 });
+
+/* ---------------------------- recheck findings ---------------------------- */
+test('N1: the first Restore that wakes the worker is not refused', async () => {
+    const m = browserModel();
+    const chrome = makeChrome(m.opts);
+    chrome._stores.local.settings = { batchDelaySec: 0, batchSize: 5 };
+    loadScript('tab-manager/background.js', chrome);           // the message arrives while resumeJob still reads storage
+    const r = await sendMsg(chrome, { type: 'openUrls', urls: urls(2, 'n'), mode: 'batch' });
+    assert.equal(r.ok, true, r.error);
+    await until(() => m.log.filter(e => e[0] === 'create').length === 2, 2000);
+});
+
+test('N2: a playlist fetched again after a reload keeps its row', async () => {
+    const { chrome } = await mvBoot();
+    mvHit(chrome, 'https://cdn.example/master.m3u8', 'application/vnd.apple.mpegurl');
+    await until(async () => (await mvItems(chrome)).length === 1);
+    await wait(30);
+    const t0 = Date.now();                                    // reload: new document starts
+    await wait(20);
+    mvHit(chrome, 'https://cdn.example/master.m3u8', 'application/vnd.apple.mpegurl');   // fetched again by the new page
+    await wait(60);
+    await sendMsg(chrome, { type: 'pageStart', url: 'https://page.example/watch', timeOrigin: t0 }, { tab: { id: 7 }, frameId: 0 });
+    assert.equal((await mvItems(chrome)).length, 1);
+});
+
+test('N3: migrating a 1.6.0 store keeps only open tabs and keeps the old copy if saving fails', async () => {
+    const sent = [];
+    const chrome = makeChrome({ tabs: { get: async id => ({ id, incognito: false }), query: async () => [{ id: 7 }], sendMessage: async () => ({}) } });
+    chrome._stores.local.mediaByTab = {
+        7: { items: [{ url: 'https://o/a.mp4', kind: 'video', ext: 'mp4', ts: 1 }], updatedAt: 1 },
+        99: { items: [{ url: 'https://o/dead.mp4', kind: 'video', ext: 'mp4', ts: 1 }], updatedAt: 1 }
+    };
+    let fail = true;
+    const origSet = chrome.storage.session.set;
+    chrome.storage.session.set = (o, cb) => fail ? Promise.reject(new Error('QUOTA_BYTES quota exceeded')) : origSet(o, cb);
+    loadScript('media-sniffer-ext/background.js', chrome);
+    const list = plain((await sendMsg(chrome, { type: 'getMedia', tabId: null })).items);
+    assert.deepEqual(list.map(i => i.tabId), [7], 'closed tab 99 should be pruned');
+    await wait(1800);
+    assert.ok(chrome._stores.local.mediaByTab, 'old copy deleted although the save failed');
+    fail = false;
+    mvHit(chrome, 'https://cdn.example/b.mp4');
+    await wait(1800);
+    assert.ok(chrome._stores.session['mv:tab:7']);
+    assert.equal(chrome._stores.local.mediaByTab, undefined);
+});
+
+test('N4: Open as group falls back to the current window when no window can be made', async () => {
+    const m = browserModel();
+    m.opts.windows.create = async () => { throw new Error('no windows'); };
+    const chrome = await tvBoot(m);
+    const r1 = await sendMsg(chrome, { type: 'openSet', newWindow: true, tabs: urls(2).map(url => ({ url })), groupAll: { title: 'G' } });
+    assert.equal(r1.noWindow, true);
+    const src = fs.readFileSync(path.join(ROOT, 'tab-manager/manager.js'), 'utf8');
+    assert.match(src, /res\.noWindow\) res = await ask\(false\)/, 'manager retries in the current window');
+});
+
+test('R9: more CDN token parameters are ignored when folding playlists', async () => {
+    const { chrome } = await mvBoot();
+    for (const q of ['md5=a&expires=1', 'md5=b&expires=2', 'hdnea=x', 'hdnea=y', '__token__=p', 'lsig=1', 'wmsAuthSign=z'])
+        mvHit(chrome, 'https://cdn.example/v.m3u8?' + q, 'application/vnd.apple.mpegurl');
+    await wait(150);
+    assert.equal((await mvItems(chrome)).length, 1);
+});

@@ -167,7 +167,7 @@ function isSegmentUrl(url, ext, size) {
 /* Playlists are re-polled with changing queries (LL-HLS _HLS_msn, tokens):
  * one row per playlist path plus its NON-volatile query (?id=A and ?id=B are
  * different playlists; _HLS_*, token, expires, signature… are dropped). */
-const VOLATILE_Q = /^(_hls_.*|token|tok|expires?|exp|e|st|sig|signature|hdnts|hdntl|hmac|auth|t|ts|time|timestamp|nonce|policy|key-pair-id|x-amz-.*|cb|rnd|_)$/i;
+const VOLATILE_Q = /^(_hls_.*|token|tok|__token__|expires?|exp|e|st|sig|lsig|signature|md5|hash|hdnts|hdntl|hdnea|hmac|auth|wmsauthsign|t|ts|time|timestamp|nonce|policy|key-pair-id|x-amz-.*|cb|rnd|_)$/i;
 function streamKey(url) {
     try {
         const u = new URL(url);
@@ -212,8 +212,14 @@ function loadMedia() {
         const m = {};
         const local = await areaGetAll(chrome.storage.local);
         const legacy = local[K.MEDIA];
-        if (legacy && typeof legacy === 'object') {          // 1.6.0 kept every tab in one key
-            for (const tid in legacy) if (legacy[tid] && Array.isArray(legacy[tid].items)) { m[tid] = legacy[tid]; dirty.add(tid); }
+        if (legacy && typeof legacy === 'object') {          // 1.6.0 kept every tab in one key, never pruned
+            let open = null;
+            try { open = new Set((await chrome.tabs.query({})).map(t => String(t.id))); } catch (e) {}
+            for (const tid in legacy) {
+                if (!legacy[tid] || !Array.isArray(legacy[tid].items)) continue;
+                if (open && !open.has(String(tid))) continue;  // tab long gone: not carried over
+                m[tid] = legacy[tid]; dirty.add(tid);
+            }
         }
         for (const k in local) if (k.indexOf(TAB_P) === 0 && local[k] && Array.isArray(local[k].items)) { m[k.slice(TAB_P.length)] = local[k]; if (STORE !== chrome.storage.local) dirty.add(k.slice(TAB_P.length)); }
         if (SESSION) {
@@ -247,18 +253,36 @@ function flushSave() {
         out[TAB_P + tid] = b;
     }
     for (const tid of removed) if (!(media && media[tid])) gone.push(TAB_P + tid);
+    const wrote = [...dirty];
     dirty.clear(); removed.clear();
-    if (Object.keys(out).length) STORE.set(out);
     if (gone.length) { try { STORE.remove(gone); } catch (e) {} }
-    if (migrateLegacy) {
-        migrateLegacy = false;
-        const old = [K.MEDIA];
-        chrome.storage.local.get(null, all => {
-            for (const k in (all || {})) if (k.indexOf(TAB_P) === 0 && STORE !== chrome.storage.local) old.push(k);
-            chrome.storage.local.remove(old);
-        });
-        if (SESSION) try { SESSION.remove(K.MEDIA); } catch (e) {}
-    }
+    writeOut(out, wrote).then(ok => { if (ok && migrateLegacy) dropLegacy(); });
+}
+/* storage.session holds 10 MB: if a write is refused, retry once with each
+ * list cut to its newest 100 items; the old 1.6.0 copy is only deleted after
+ * a write succeeded. */
+let lastSaveError = '';
+async function setArea(o) {
+    try { await STORE.set(o); return true; }
+    catch (e) { lastSaveError = String((e && e.message) || e); return false; }
+}
+async function writeOut(out, tids) {
+    if (!Object.keys(out).length) return true;
+    if (await setArea(out)) return true;
+    const small = {};
+    for (const k in out) small[k] = Object.assign({}, out[k], { items: out[k].items.slice(-100) });
+    if (await setArea(small)) return true;
+    tids.forEach(t => dirty.add(t));             // keep them for the next try
+    return false;
+}
+function dropLegacy() {
+    migrateLegacy = false;
+    const old = [K.MEDIA];
+    chrome.storage.local.get(null, all => {
+        for (const k in (all || {})) if (k.indexOf(TAB_P) === 0 && STORE !== chrome.storage.local) old.push(k);
+        chrome.storage.local.remove(old);
+    });
+    if (SESSION) try { SESSION.remove(K.MEDIA); } catch (e) {}
 }
 
 async function addItem(tabId, item) {
@@ -275,7 +299,8 @@ async function addItem(tabId, item) {
     const sk = item.kind === 'stream' ? streamKey(item.url) : null;
     const existing = bucket.items.find(x => x.url === item.url || (sk && x.kind === 'stream' && streamKey(x.url) === sk));
     if (existing) {
-        if (sk && existing.url !== item.url) { existing.url = item.url; existing.ts = Date.now(); }   // freshest token
+        if (sk && existing.url !== item.url) existing.url = item.url;   // freshest token
+        existing.ts = Date.now();          // seen again (e.g. by the reloaded page): pageStart must keep it
         if (item.size && !existing.segKey && (!existing.size || item.size > existing.size)) existing.size = item.size;
         if (item.mime && !existing.mime) existing.mime = item.mime;
         existing.hits = (existing.hits || 1) + 1;

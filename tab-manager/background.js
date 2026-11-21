@@ -336,6 +336,7 @@ async function runOpenJob(urls, mode, windowId) {
         for (const u of urls) await makeTab({ url: u, windowId }, unload);
         return { ok: true, opened: urls.length };
     }
+    if (resumeP) await resumeP;               // a restore saved before the worker slept goes first
     if (job) return { ok: false, error: 'A restore is already running' };
     startBatch(urls, 0, windowId);            // reserves `job` before any await
     return { ok: true, started: true, total: urls.length };
@@ -371,16 +372,19 @@ function startBatch(urls, done, windowId) {
         step();
     })();
 }
-async function resumeJob() {
-    if (job) return;
-    const reserve = job = { urls: [], total: 0, done: 0, cancelled: false, reserving: true };   // hold the slot while reading
-    let j = await getJob();
-    if (!j) { const old = await get(K.OPEN_JOB, null); if (old) { j = old; await set(K.OPEN_JOB, null); } }   // 1.13.0 kept it in local
-    if (job !== reserve) return;
-    job = null;
-    if (!j) return;
-    if (!Array.isArray(j.urls) || !(j.done < j.urls.length)) { await setJob(null); return; }  // old format or finished
-    startBatch(j.urls, j.done | 0, j.windowId);
+/* At worker start: resume a restore that was cut short. New restore requests
+ * that arrive meanwhile wait for this (resumeP) and are then refused only if
+ * a saved restore really was resumed. */
+let resumeP = null;
+function resumeJob() {
+    resumeP = (async () => {
+        let j = await getJob();
+        if (!j) { const old = await get(K.OPEN_JOB, null); if (old) { j = old; await set(K.OPEN_JOB, null); } }   // 1.13.0 kept it in local
+        if (!j || job) return;
+        if (!Array.isArray(j.urls) || !(j.done < j.urls.length)) { await setJob(null); return; }  // old format or finished
+        startBatch(j.urls, j.done | 0, j.windowId);
+    })().catch(() => {}).finally(() => { resumeP = null; });
+    return resumeP;
 }
 
 /* Open a set of tabs, here or in a new window, grouping as asked:
