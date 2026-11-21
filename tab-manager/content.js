@@ -55,12 +55,29 @@
         } else openSheet();
     }
 
-    /* ------------------------------ styles ------------------------------ */
-    function ensureSheetStyle() {
-        if (document.getElementById('tv-sheet-style')) return;
+    /* ------------------------------ styles ------------------------------
+     * Everything lives in a CLOSED shadow root on our own host element: page
+     * CSS (iframe{display:none}, div resets, a site's own .g-blue) can't reach
+     * it, page scripts can't read it, and pages without <body> still work. */
+    let uiHost = null, uiRoot = null;
+    function ensureRoot() {
+        if (uiHost && uiHost.isConnected && uiRoot) return uiRoot;
+        uiHost = document.createElement('tab-vault-ui');
+        uiHost.setAttribute('style', 'all:initial !important;display:block !important;');
+        uiRoot = uiHost.attachShadow({ mode: 'closed' });
         const s = document.createElement('style');
-        s.id = 'tv-sheet-style';
-        s.textContent = `
+        s.textContent = SHEET_CSS;
+        uiRoot.appendChild(s);
+        (document.body || document.documentElement).appendChild(uiHost);
+        return uiRoot;
+    }
+    function dropRootIfEmpty() {
+        if (!uiRoot || uiRoot.querySelector('.tv-sheetbox, #tv-sheet-wrap')) return;
+        if (uiHost) uiHost.remove();
+        uiHost = null; uiRoot = null;
+    }
+    const SHEET_CSS = `
+        *{box-sizing:border-box}
         #tv-sheet-wrap{position:fixed;inset:0;z-index:2147483640;background:rgba(0,0,0,.45);
             opacity:0;transition:opacity .22s}
         #tv-sheet-wrap.show{opacity:1}
@@ -103,15 +120,13 @@
         .g-grey{background:#6b7280}.g-blue{background:#3b82f6}.g-red{background:#ef4444}
         .g-yellow{background:#eab308}.g-green{background:#22c55e}.g-pink{background:#ec4899}
         .g-purple{background:#a855f7}.g-cyan{background:#06b6d4}.g-orange{background:#f97316}`;
-        (document.head || document.documentElement).appendChild(s);
-    }
 
     /* ------------------------- shared sheet frame ------------------------- */
     let sheetWrap = null;      // backdrop; one sheet at a time
 
     function buildSheet(id) {
-        ensureSheetStyle();
         closeSheet();
+        const root = ensureRoot();
         sheetWrap = document.createElement('div');
         sheetWrap.id = 'tv-sheet-wrap';
         const sheet = document.createElement('div');
@@ -122,8 +137,8 @@
         grab.innerHTML = '<span class="tv-pill"></span><button class="tv-close">✕</button>';
         grab.querySelector('.tv-close').addEventListener('click', closeSheet);
         sheet.appendChild(grab);
-        document.body.appendChild(sheetWrap);
-        document.body.appendChild(sheet);
+        root.appendChild(sheetWrap);
+        root.appendChild(sheet);
         requestAnimationFrame(() => { sheetWrap && sheetWrap.classList.add('show'); sheet.classList.add('show'); });
         sheetWrap.addEventListener('click', closeSheet);
 
@@ -156,11 +171,12 @@
         if (!sheetWrap) return;
         const wrap = sheetWrap; sheetWrap = null;
         wrap.classList.remove('show');
-        document.querySelectorAll('.tv-sheetbox').forEach(sh => {
+        const root = uiRoot;
+        (root ? [...root.querySelectorAll('.tv-sheetbox')] : []).forEach(sh => {
             sh.style.transform = ''; sh.classList.remove('show');
-            setTimeout(() => sh.remove(), 280);
+            setTimeout(() => { sh.remove(); dropRootIfEmpty(); }, 280);
         });
-        setTimeout(() => wrap.remove(), 280);
+        setTimeout(() => { wrap.remove(); dropRootIfEmpty(); }, 280);
     }
 
     /* --------------------------- manager sheet --------------------------- */

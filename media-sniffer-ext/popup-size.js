@@ -56,6 +56,11 @@
             B.failed.push(String(t.src).split('/').pop());
             showFail();
         }, true);
+        // Most page failures are rejected promises (async renders), not throws.
+        window.addEventListener('unhandledrejection', function (e) {
+            var r = e && e.reason;
+            B.jsErrors.push(('(async) ' + String((r && r.message) || r)).slice(0, 140));
+        });
         document.addEventListener('DOMContentLoaded', function () { B.dcl = performance.now(); });
         window.addEventListener('load', function () { B.load = performance.now(); });
 
