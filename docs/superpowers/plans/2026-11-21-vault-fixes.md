@@ -40,38 +40,44 @@ test-time source transform (nothing test-only ships).
 10. Shadow-root sheet still opens, drags and closes; page CSS `iframe{display:none}` cannot hide it.
 
 ## Tasks
-- [ ] F0 Harness (done when `npm test` runs real worker files) — commit
-- [ ] T1 closed-list queue + `closedOp` message (remove / clear / import) in `tab-manager/background.js`; manager uses it (Forget, Clear, Forget selected, Clear all, Import)
-- [ ] T4 import validation + sort by closedAt + cap (worker); sessions/groups validated (userscript already does)
-- [ ] T2/T12 `openSet` in the worker: new window or here, group by name/colour, create→group→discard per tab; manager's reopenWindow / restoreGroup / openTabsGrouped / New window use it
-- [ ] T7 persisted open job `{urls, done, total, windowId}` resumed at worker start
-- [ ] T9 mirror in `storage.session`, no data: favicons, title-only changes debounced longer
-- [ ] T3 render generation guard + 200 ms search debounce in manager.js
-- [ ] T13 batch delay 0 allowed
-- [ ] Live Open list: tabs.* events → debounced re-render while Open/Groups is shown; ✕ on a gone tab doesn't throw
-- [ ] T8/M17 `use_dynamic_url: true` in both manifests
-- [ ] T14 content.js sheet in a closed shadow root
-- [ ] T15 popup-size.js records `unhandledrejection` (both copies identical)
-- [ ] T5/T11 userscript per-tab live keys + revision key + sweep lease
-- [ ] T6 userscript twin split re-subscribes cmd listener
-- [ ] T10 userscript logPage debounce / skip unchanged
-- [ ] M1 loadMedia promise cache
-- [ ] M2 clear on top-frame `loading` (reload) in background.js
-- [ ] M3 prune dead tab buckets on startup; save only changed buckets
-- [ ] M4 `__MV` setters only when debug on; package-name validation
-- [ ] M5 stream dedupe on origin+path (ext + userscript)
-- [ ] M6 extensionless segments by Content-Type; port `isSegmentUrl` into the extension
-- [ ] M7 DOM item names via ported `makeName/sanitizeName`
-- [ ] M8 bulk Remove via a worker `remove` message
-- [ ] M9 content.js `reported` reset on clear
-- [ ] M10 206 without total → size unknown
-- [ ] M11 userscript reads content-range only for media
-- [ ] M12 webRequest `types` filter, cached settings, debounced badge
-- [ ] M13 popup search filters locally
-- [ ] M14 userscript frames: hello tick stops, child frames scan lazily, `mvf_o_` keys cleaned
-- [ ] M15 content script `all_frames: true`, child frames report DOM media only
-- [ ] M16 eruda pinned with integrity check
-- [ ] M18 Referer for extension downloads via a session DNR rule
-- [ ] Versions, docs/READMEs, dist zips; fresh review + recheck
+- [x] F0 Harness (done when `npm test` runs real worker files) — commit
+- [x] T1 closed-list queue + `closedOp` message (remove / clear / import) in `tab-manager/background.js`; manager uses it (Forget, Clear, Forget selected, Clear all, Import)
+- [x] T4 import validation + sort by closedAt + cap (worker); sessions/groups validated (userscript already does)
+- [x] T2/T12 `openSet` in the worker: new window or here, group by name/colour, create→group→discard per tab; manager's reopenWindow / restoreGroup / openTabsGrouped / New window use it
+- [x] T7 persisted open job `{urls, done, total, windowId}` resumed at worker start
+- [x] T9 mirror in `storage.session`, no data: favicons, title-only changes debounced longer
+- [x] T3 render generation guard + 200 ms search debounce in manager.js
+- [x] T13 batch delay 0 allowed
+- [x] Live Open list: tabs.* events → debounced re-render while Open/Groups is shown; ✕ on a gone tab doesn't throw
+- [x] T8/M17 `use_dynamic_url: true` in both manifests
+- [x] T14 content.js sheet in a closed shadow root
+- [x] T15 popup-size.js records `unhandledrejection` (both copies identical)
+- [x] T5/T11 userscript per-tab live keys + revision key + sweep lease
+- [x] T6 userscript twin split re-subscribes cmd listener
+- [x] T10 userscript logPage debounce / skip unchanged
+- [x] M1 loadMedia promise cache
+- [x] M2 clear on top-frame `loading` (reload) in background.js
+- [x] M3 prune dead tab buckets on startup; save only changed buckets
+- [x] M4 `__MV` setters only when debug on; package-name validation
+- [x] M5 stream dedupe on origin+path (ext + userscript)
+- [x] M6 extensionless segments by Content-Type; port `isSegmentUrl` into the extension
+- [x] M7 DOM item names via ported `makeName/sanitizeName`
+- [x] M8 bulk Remove via a worker `remove` message
+- [x] M9 content.js `reported` reset on clear
+- [x] M10 206 without total → size unknown
+- [x] M11 userscript reads content-range only for media
+- [x] M12 webRequest `types` filter, cached settings, debounced badge
+- [x] M13 popup search filters locally
+- [x] M14 userscript frames: hello tick stops, child frames scan lazily, `mvf_o_` keys cleaned
+- [x] M15 content script `all_frames: true`, child frames report DOM media only
+- [x] M16 eruda pinned with integrity check
+- [x] M18 (changed): not buildable as a DNR rule — Chromium hides browser-initiated non-navigation requests from extensions (chrome_extensions_api_client.cc ShouldHideBrowserNetworkRequest); built a page notice on SERVER_FORBIDDEN / SERVER_UNAUTHORIZED instead
+- [x] Versions, docs/READMEs, dist zips
+- [ ] Fresh review + recheck
 
 ## Execution notes
+- Commits: 46d2917 harness · ae3ffc1 T1/T4 · aa1b5f2 T2/T7/T9/T12/T3/T13/live list · 343af83 T8/T14/T15/M17 · 62b672d T5/T6/T10/T11 · 29d0294 Media Vault ext · 58ff0e8 Media Vault userscript · e522859 versions/docs/zips.
+- Reproduced before fixing (test fails on the old file): T1 (10 closes → 1 kept), T3 (15 rows for 5), T13 (0 saved as 3), live list, M1 (4 of 5 kept), M2, M6 (10 rows), M7, M10, M12 (40 settings reads), M8/M13 (popup tests fail on old media.js).
+- T6 test reaches the new splitTwin hook, so on the old file it fails at "splitTwin is exposed", not on the behaviour itself.
+- Gotchas: fake storage on Windows rounds 1 ms timers up to the clock tick — tests wait for results (until()) instead of fixed sleeps; `until()` must await async checks; jsdom window.top is not redefinable, use a real iframe; bash heredocs mangle long edit scripts — write them as files.
+- Tests: 66 passing (npm test).
