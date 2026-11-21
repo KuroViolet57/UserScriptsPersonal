@@ -51,7 +51,7 @@ function slimTab(t) {
         id: t.id,
         url: t.url || t.pendingUrl || '',
         title: t.title || '',
-        favIconUrl: t.favIconUrl || '',
+        favIconUrl: storableIcon(t.favIconUrl),
         pinned: !!t.pinned,
         groupId: (t.groupId == null ? -1 : t.groupId),
         index: t.index,
@@ -61,11 +61,25 @@ function slimTab(t) {
     };
 }
 
-/* --------------------------- window mirror --------------------------- */
-let rebuildTimer = null;
+/* --------------------------- window mirror ---------------------------
+ * Kept in storage.session (in memory, survives worker restarts, "not exposed
+ * to content scripts" by default — so pages are not sent a copy on every
+ * change). Rebuilt at startup anyway. storage.local only where session is
+ * missing. */
+const MIRROR_AREA = (chrome.storage && chrome.storage.session) ? chrome.storage.session : chrome.storage.local;
+function getMirror() { return new Promise(res => MIRROR_AREA.get({ [K.MIRROR]: {} }, o => res((o && o[K.MIRROR]) || {}))); }
+function setMirror(v) { return new Promise(res => MIRROR_AREA.set({ [K.MIRROR]: v }, () => res())); }
+if (MIRROR_AREA !== chrome.storage.local) { try { chrome.storage.local.remove(K.MIRROR); } catch (e) {} }
+
+/* Keeps the EARLIEST pending deadline: a title-only change (slow) never
+ * postpones a structural change (fast) that is already waiting. */
+let rebuildTimer = null, rebuildDue = 0;
 function scheduleRebuild(delay) {
+    const due = Date.now() + (delay || 400);
+    if (rebuildTimer && rebuildDue <= due) return;
     if (rebuildTimer) clearTimeout(rebuildTimer);
-    rebuildTimer = setTimeout(() => { rebuildTimer = null; rebuildMirror(); }, delay || 400);
+    rebuildDue = due;
+    rebuildTimer = setTimeout(() => { rebuildTimer = null; rebuildDue = 0; rebuildMirror(); }, due - Date.now());
 }
 
 async function rebuildMirror() {
@@ -91,7 +105,7 @@ async function rebuildMirror() {
         }
         const now = Date.now();
         for (const id in mirror) mirror[id].updatedAt = now;
-        await set(K.MIRROR, mirror);
+        await setMirror(mirror);
     } catch (e) { /* transient */ }
 }
 
@@ -224,7 +238,8 @@ chrome.tabs.onAttached.addListener(() => scheduleRebuild());
 chrome.tabs.onDetached.addListener(() => scheduleRebuild());
 chrome.tabs.onReplaced.addListener(() => scheduleRebuild());
 chrome.tabs.onUpdated.addListener((id, info) => {
-    if (info.url || info.title || info.status === 'complete' || info.groupId != null) scheduleRebuild();
+    if (info.url || info.status === 'complete' || info.groupId != null || info.pinned != null) scheduleRebuild();
+    else if (info.title) scheduleRebuild(2500);     // chat counters, timers: titles change constantly
 });
 chrome.windows.onCreated.addListener(() => scheduleRebuild());
 
@@ -242,7 +257,7 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
     // be emptied before windows.onRemoved gets to read it.
     if (removeInfo && removeInfo.isWindowClosing) return;
     try {
-        const mirror = await get(K.MIRROR, {});
+        const mirror = await getMirror();
         for (const wid in mirror) {
             const t = (mirror[wid].tabs || []).find(x => x.id === tabId);
             if (t) { await pushClosedTab(t); break; }
@@ -253,12 +268,13 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
     try {
-        const mirror = await get(K.MIRROR, {});
+        const mirror = await getMirror();
         const win = mirror[windowId];
         if (win) {
             await pushClosedWindow(win);
-            delete mirror[windowId];
-            await set(K.MIRROR, mirror);
+            const fresh = await getMirror();
+            delete fresh[windowId];
+            await setMirror(fresh);
         }
     } catch (e) {}
     scheduleRebuild(900);
@@ -274,56 +290,128 @@ chrome.runtime.onInstalled.addListener(() => rebuildMirror());
  * --------------------------------------------------------------------- */
 let job = null;
 
+/* Create a background tab and immediately discard it: the tab exists with
+ * its URL but nothing loads until the user taps it. This is what lets a
+ * 400-tab restore actually produce 400 tabs instead of choking the browser. */
+async function makeTab(props, unload, afterCreate) {
+    try {
+        const t = await chrome.tabs.create(Object.assign({ active: false }, props));
+        if (afterCreate && t) { try { await afterCreate(t); } catch (e) {} }
+        if (unload && t && t.id != null) { try { await chrome.tabs.discard(t.id); } catch (e) {} }
+        return t;
+    } catch (e) { return null; }
+}
+async function unloadOn() {
+    const s = await getSettings();
+    return !!s.restoreUnloaded && !!(chrome.tabs && chrome.tabs.discard);
+}
+async function liveWindowId(id) {
+    if (id == null) return undefined;
+    try { await chrome.windows.get(id); return id; } catch (e) { return undefined; }
+}
+
 async function runOpenJob(urls, mode, windowId) {
     if (job) return { ok: false, error: 'A restore is already running' };
-    const s = await getSettings();
-    const unload = !!s.restoreUnloaded && !!(chrome.tabs && chrome.tabs.discard);
+    const unload = await unloadOn();
 
-    // Create a background tab and immediately discard it: the tab exists with
-    // its URL but nothing loads until the user taps it. This is what lets a
-    // 400-tab restore actually produce 400 tabs instead of choking the
-    // browser — memory/network stay flat.
-    const mkTab = async props => {
-        try {
-            const t = await chrome.tabs.create(Object.assign({ active: false }, props));
-            if (unload && t && t.id != null) { try { await chrome.tabs.discard(t.id); } catch (e) {} }
-            return t;
-        } catch (e) { return null; }
-    };
-
-    if (mode === 'window') {
-        // When unloading, seed the window with just the first URL (a window
-        // created with 30 URLs loads all 30 at once) and add the rest discarded.
-        const chunk = unload ? urls.slice(0, 1) : urls.slice(0, 30);
-        const win = await chrome.windows.create({ url: chunk });
-        for (let i = chunk.length; i < urls.length; i++) {
-            await mkTab({ url: urls[i], windowId: win.id });
-        }
-        return { ok: true, opened: urls.length };
-    }
+    if (mode === 'window') return openSetNow({ tabs: urls.map(url => ({ url })), newWindow: true });
 
     if (mode === 'all') {
-        for (const u of urls) await mkTab({ url: u, windowId });
+        for (const u of urls) await makeTab({ url: u, windowId }, unload);
         return { ok: true, opened: urls.length };
     }
 
-    // batched
-    job = { total: urls.length, done: 0, cancelled: false };
-    const batch = Math.max(1, s.batchSize | 0);
-    const delay = Math.max(0, Math.min(20, s.batchDelaySec)) * 1000;
+    startBatch(urls, 0, windowId);
+    return { ok: true, started: true, total: urls.length };
+}
 
+/* Batched restore. The URLs and progress are saved after every tab, so a
+ * worker that is stopped mid-job resumes at the next start (resumeJob). */
+async function startBatch(urls, done, windowId) {
+    const s = await getSettings();
+    const unload = await unloadOn();
+    job = { urls, total: urls.length, done, windowId, cancelled: false };
+    const batch = Math.max(1, s.batchSize | 0);
+    const delay = Math.max(0, Math.min(20, +s.batchDelaySec || 0)) * 1000;
+    const save = () => set(K.OPEN_JOB, job ? { urls: job.urls, done: job.done, total: job.total, windowId: job.windowId } : null);
+    await save();
     const step = async () => {
         if (!job || job.cancelled) { job = null; await set(K.OPEN_JOB, null); return; }
         const end = Math.min(job.done + batch, urls.length);
-        for (; job.done < end; job.done++) {
-            await mkTab({ url: urls[job.done], windowId });
+        while (job && !job.cancelled && job.done < end) {
+            await makeTab({ url: urls[job.done], windowId: job.windowId }, unload);
+            job.done++;
+            await save();
         }
-        await set(K.OPEN_JOB, { done: job.done, total: job.total });
-        if (job.done < urls.length) setTimeout(step, delay);
+        if (job && !job.cancelled && job.done < urls.length) setTimeout(step, delay);
         else { job = null; await set(K.OPEN_JOB, null); }
     };
     step();
-    return { ok: true, started: true, total: urls.length };
+}
+async function resumeJob() {
+    if (job) return;
+    const j = await get(K.OPEN_JOB, null);
+    if (!j) return;
+    if (!Array.isArray(j.urls) || !(j.done < j.urls.length)) { await set(K.OPEN_JOB, null); return; }  // old format or finished
+    startBatch(j.urls, j.done | 0, await liveWindowId(j.windowId));
+}
+
+/* Open a set of tabs, here or in a new window, grouping as asked:
+ *   tabs: [{url, group?: {title, color}}], groupAll?: {title, color}
+ * Each tab is created, put in its group, then discarded before the next one
+ * is created — no load flood, and grouping happens while the tab is loaded.
+ * Runs in the worker so a closing popup cannot cut it short. */
+async function openSetNow({ tabs, newWindow, groupAll, windowId }) {
+    const items = (tabs || []).filter(t => t && isRestorable(t.url));
+    if (!items.length) return { ok: false, error: 'Nothing restorable' };
+    const unload = await unloadOn();
+    const canGroup = !!(chrome.tabs && chrome.tabs.group);
+    const gids = {};
+    let groupFailed = !canGroup, groupedAny = false;
+    const keyOf = it => groupAll ? '*' : (it.group && it.group.title ? it.group.title + '|' + (it.group.color || 'grey') : null);
+    const specOf = it => groupAll || it.group;
+    let winId = windowId;
+
+    const addToGroup = async (tab, it) => {
+        const key = keyOf(it);
+        if (!key || groupFailed || !tab || tab.id == null) return;
+        try {
+            if (gids[key] != null) await chrome.tabs.group({ groupId: gids[key], tabIds: [tab.id] });
+            else {
+                const opts = { tabIds: [tab.id] };
+                if (winId != null) opts.createProperties = { windowId: winId };
+                gids[key] = await chrome.tabs.group(opts);
+                const sp = specOf(it) || {};
+                if (chrome.tabGroups && chrome.tabGroups.update) {
+                    try { await chrome.tabGroups.update(gids[key], { title: sp.title || '', color: sp.color || 'blue' }); } catch (e) {}
+                }
+            }
+            groupedAny = true;
+        } catch (e) { groupFailed = true; }
+    };
+
+    let opened = 0, start = 0;
+    if (newWindow) {
+        try {
+            const win = await chrome.windows.create({ url: items[0].url });
+            winId = win.id; start = 1; opened = 1;
+            await addToGroup((win.tabs || [])[0], items[0]);
+        } catch (e) { winId = windowId; }
+    }
+    for (let i = start; i < items.length; i++) {
+        const t = await makeTab({ url: items[i].url, windowId: winId }, unload, tab => addToGroup(tab, items[i]));
+        if (t) opened++;
+    }
+    const wanted = items.some(keyOf);
+    return { ok: true, opened, windowId: winId, grouped: wanted && groupedAny && !groupFailed, groupFailed: wanted && groupFailed };
+}
+
+async function moveToNewWindow(tabIds) {
+    const ids = (tabIds || []).filter(x => x != null);
+    if (!ids.length) return { ok: false, error: 'No tabs' };
+    const win = await chrome.windows.create({ tabId: ids[0] });
+    if (ids.length > 1) await chrome.tabs.move(ids.slice(1), { windowId: win.id, index: -1 });
+    return { ok: true, windowId: win.id };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -335,6 +423,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (job) job.cancelled = true;
                 await set(K.OPEN_JOB, null);
                 sendResponse({ ok: true });
+            } else if (msg.type === 'openSet') {
+                sendResponse(await openSetNow(msg));
+            } else if (msg.type === 'moveToNewWindow') {
+                sendResponse(await moveToNewWindow(msg.tabIds));
             } else if (msg.type === 'closedOp') {
                 try { sendResponse(await withClosed(() => closedOpNow(msg))); }
                 catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
@@ -397,3 +489,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 rebuildMirror();
+resumeJob();

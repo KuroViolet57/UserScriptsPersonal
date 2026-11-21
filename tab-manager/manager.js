@@ -161,6 +161,11 @@ function matches(t) {
     return (t.title || '').toLowerCase().includes(q) || (t.url || '').toLowerCase().includes(q);
 }
 function isRestorable(u) { return /^https?:\/\//i.test(u || ''); }
+/* A typed number, clamped; empty or junk gives the default, and 0 stays 0. */
+function clampNum(v, min, max, def) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : def;
+}
 
 function confirmBox(msg) { return Promise.resolve(window.confirm(msg)); }
 
@@ -225,8 +230,7 @@ function askTextarea(title, placeholder) {
  * the two gets selected. */
 function rerenderList() {
     if (state.section === 'open') { renderOpen(); renderActions(); }
-    else if (state.section === 'closed') renderClosed().then(renderActions);
-    else if (state.section === 'hist') renderHist().then(renderActions);
+    else if (state.section === 'closed' || state.section === 'hist') render();
 }
 function selectRangeTo(index) {
     const sel = sectionSelection();
@@ -357,7 +361,21 @@ async function loadLive() {
 function groupOf(id) { return state.groups.find(g => g.id === id); }
 
 /* ------------------------------ render ------------------------------ */
-async function render() {
+/* One render at a time. A render asked for while one runs (typing in search,
+ * a live tab event) is merged into one more pass afterwards — overlapping
+ * renders each cleared and refilled the same box, showing rows twice. */
+let rendering = null, renderAgain = false;
+function render() {
+    if (rendering) { renderAgain = true; return rendering; }
+    rendering = (async () => {
+        try { do { renderAgain = false; await renderNow(); } while (renderAgain); }
+        catch (e) { console.warn('[Tab Vault] render failed', e); }
+        finally { rendering = null; }
+    })();
+    return rendering;
+}
+
+async function renderNow() {
     const s = state.section;
     if (state.prevSection !== s) { state.lastSelIdx = -1; state.prevSection = s; }
     document.body.dataset.sec = s;
@@ -423,7 +441,11 @@ function tabRow(t) {
     body.onclick = () => chrome.tabs.update(t.id, { active: true }).then(() => chrome.windows.update(t.windowId, { focused: true }).catch(() => {}));
 
     const x = el('button', 'rb'); x.innerHTML = svg('x', 16); x.title = 'Close tab';
-    x.onclick = async e => { e.stopPropagation(); await chrome.tabs.remove(t.id); state.selected.delete(t.id); render(); };
+    x.onclick = async e => {
+        e.stopPropagation();
+        try { await chrome.tabs.remove(t.id); } catch (err) { /* already closed elsewhere */ }
+        state.selected.delete(t.id); render();
+    };
 
     row.appendChild(cb); row.appendChild(avatarFor(t)); row.appendChild(body); row.appendChild(x);
     return row;
@@ -752,7 +774,7 @@ async function renderHist() {
     dateIn.style.display = state.histRange === 'day' ? '' : 'none';
     if (state.histDate) dateIn.value = state.histDate;
     fromIn.value = state.histFrom; toIn.value = state.histTo;
-    const rerun = () => renderHist().then(renderActions);
+    const rerun = () => render();
     rangeSel.onchange = () => { state.histRange = rangeSel.value; rerun(); };
     dateIn.onchange = () => { state.histDate = dateIn.value; rerun(); };
     maxIn.onchange = () => { state.histMax = Math.max(20, Math.min(2000, +maxIn.value || 300)); rerun(); };
@@ -840,44 +862,17 @@ async function openTabsGrouped(items, useWindow) {
     const r = await askText('Group name', '', { colors: true });
     if (!r) return;
 
-    let winId = null;
-    const made = [];
-    if (useWindow) {
-        try {
-            const win = await chrome.windows.create({ url: urls.slice(0, 30) });
-            winId = win.id;
-            (win.tabs || []).forEach(t => made.push(t));
-            for (let i = 30; i < urls.length; i++) {
-                try { made.push(await chrome.tabs.create({ url: urls[i], windowId: winId, active: false })); } catch (e) {}
-            }
-        } catch (e) { /* fall through: open here instead */ }
-    }
-    if (!made.length) {
-        winId = null;
-        for (const u of urls) {
-            try { made.push(await chrome.tabs.create({ url: u, active: false })); } catch (e) {}
-        }
-    }
-
-    let grouped = false;
-    if (chrome.tabs.group && made.length) {
-        try {
-            const opts = { tabIds: made.map(t => t.id).filter(id => id != null) };
-            if (winId != null) opts.createProperties = { windowId: winId };
-            const gid = await chrome.tabs.group(opts);
-            grouped = true;
-            if (chrome.tabGroups && chrome.tabGroups.update) {
-                try { await chrome.tabGroups.update(gid, { title: r.text || '', color: r.color || 'blue' }); } catch (e) {}
-            }
-        } catch (e) { /* browser refused to group */ }
-    }
-    await discardMade(made);
-
-    if (grouped) toast(`Opened ${made.length} tabs in group “${r.text || 'group'}”`);
+    const res = await send({
+        type: 'openSet', newWindow: !!useWindow,
+        tabs: urls.map(url => ({ url })),
+        groupAll: { title: r.text || '', color: r.color || 'blue' }
+    });
+    if (!res.ok) { toast(res.error || 'Could not open'); return; }
+    if (res.grouped) toast(`Opened ${res.opened} tabs in group “${r.text || 'group'}”`);
     else {
         // The set is still preserved as one unit: save it as a Tab Vault group.
         await createSavedGroup(items, r.text || 'Group', r.color || 'blue');
-        toast(`Opened ${made.length} tabs — browser refused to group, saved as “${r.text || 'Group'}” instead`);
+        toast(`Opened ${res.opened} tabs — browser refused to group, saved as “${r.text || 'Group'}” instead`);
     }
 }
 
@@ -1026,12 +1021,12 @@ async function renderSettings() {
             gestureTarget: $('#s-gtarget').value,
             gesture2: $('#s-gesture2').value,
             gestureTarget2: $('#s-gtarget2').value,
-            popupW: Math.max(0, Math.min(800, +$('#s-pw').value || 0)),
-            popupH: Math.max(0, Math.min(900, +$('#s-ph').value || 0)),
-            batchSize: Math.max(1, Math.min(50, +$('#s-batch').value || 10)),
-            batchDelaySec: Math.max(0, Math.min(20, +$('#s-delay').value || 3)),
-            maxClosedWindows: Math.max(5, Math.min(300, +$('#s-mw').value || 50)),
-            maxClosedTabs: Math.max(10, Math.min(2000, +$('#s-mt').value || 300))
+            popupW: clampNum($('#s-pw').value, 0, 800, 0),
+            popupH: clampNum($('#s-ph').value, 0, 900, 0),
+            batchSize: clampNum($('#s-batch').value, 1, 50, 10),
+            batchDelaySec: clampNum($('#s-delay').value, 0, 20, 3),
+            maxClosedWindows: clampNum($('#s-mw').value, 5, 300, 50),
+            maxClosedTabs: clampNum($('#s-mt').value, 10, 2000, 300)
         });
         try {
             const pw = Math.max(0, Math.min(800, +$('#s-pw').value || 0));
@@ -1408,69 +1403,32 @@ async function saveGroup(g, tabs) {
     toast('Group saved'); render();
 }
 
-/* Unload freshly created background tabs so they only load when tapped.
- * Runs AFTER any grouping — a discarded tab regroups less reliably. */
-async function discardMade(made) {
-    const s = await getSettings();
-    if (!s.restoreUnloaded || !chrome.tabs.discard) return;
-    for (const t of made) {
-        if (t && t.id != null && !t.active) { try { await chrome.tabs.discard(t.id); } catch (e) {} }
-    }
-}
-
-/* Restore a saved group: open its tabs, then re-group them under the name. */
+/* Restore a saved group: open its tabs, then re-group them under the name.
+ * The worker does it (openSet), so closing the popup cannot cut it short;
+ * each tab is grouped, then unloaded, before the next one is created. */
 async function restoreGroup(sg) {
-    const created = [];
-    for (const t of sg.tabs) {
-        try { created.push(await chrome.tabs.create({ url: t.url, active: false })); } catch (e) {}
-    }
-    if (state.groupsUsable && created.length) {
-        try {
-            const gid = await chrome.tabs.group({ tabIds: created.map(t => t.id) });
-            await chrome.tabGroups.update(gid, { title: sg.name, color: sg.color || 'blue' });
-        } catch (e) { /* grouping unsupported — tabs are still open */ }
-    }
-    await discardMade(created);
-    toast(`Restored ${created.length} tabs`);
+    const r = await send({
+        type: 'openSet', newWindow: false,
+        tabs: sg.tabs.map(t => ({ url: t.url })),
+        groupAll: state.groupsUsable ? { title: sg.name || '', color: sg.color || 'blue' } : null
+    });
+    if (!r.ok) { toast(r.error || 'Could not restore'); return; }
+    toast(`Restored ${r.opened} tabs` + (r.groupFailed ? ' (the browser refused to group them)' : ''));
     render();
 }
 
-/* Reopen a captured window, restoring its groups where possible. */
+/* Reopen a captured window in a new window, restoring its groups by name. */
 async function reopenWindow(w) {
     const urls = w.tabs.map(t => t.url).filter(isRestorable);
     if (!urls.length) { toast('Nothing restorable in that window'); return; }
-    try {
-        const sset = await getSettings();
-        const unload = !!sset.restoreUnloaded && !!chrome.tabs.discard;
-        const first = urls.slice(0, unload ? 1 : 30);   // seeding 30 loads all 30 at once
-        const win = await chrome.windows.create({ url: first });
-        const made = (win.tabs || []).slice();
-        for (let i = first.length; i < urls.length; i++) {
-            try { made.push(await chrome.tabs.create({ url: urls[i], windowId: win.id, active: false })); } catch (e) {}
-        }
-        if (state.groupsUsable) {
-            const byGroup = {};
-            w.tabs.forEach((t, i) => {
-                if (!t.group || !t.group.title) return;
-                const key = t.group.title + '|' + (t.group.color || 'grey');
-                (byGroup[key] || (byGroup[key] = [])).push(i);
-            });
-            for (const key in byGroup) {
-                const ids = byGroup[key].map(i => made[i] && made[i].id).filter(x => x != null);
-                if (!ids.length) continue;
-                try {
-                    const gid = await chrome.tabs.group({ tabIds: ids, createProperties: { windowId: win.id } });
-                    const [title, color] = key.split('|');
-                    await chrome.tabGroups.update(gid, { title, color });
-                } catch (e) {}
-            }
-        }
-        await discardMade(made);
-        toast(`Reopened ${urls.length} tabs in a new window`);
-    } catch (e) {
+    const r = await send({
+        type: 'openSet', newWindow: true,
+        tabs: w.tabs.map(t => ({ url: t.url, group: state.groupsUsable ? t.group : null }))
+    });
+    if (!r.ok || r.windowId == null) {
         toast('Could not open a window — restoring here instead');
         openUrls(urls, 'batch');
-    }
+    } else toast(`Reopened ${r.opened} tabs in a new window`);
     render();
 }
 
@@ -1647,8 +1605,8 @@ async function actOpen(act) {
     }
     if (act === 'window') {
         try {
-            const win = await chrome.windows.create({ tabId: tabs[0].id });
-            if (tabs.length > 1) await chrome.tabs.move(tabs.slice(1).map(t => t.id), { windowId: win.id, index: -1 });
+            const r = await send({ type: 'moveToNewWindow', tabIds: tabs.map(t => t.id) });
+            if (!r.ok) throw new Error(r.error || 'no answer');
             state.selected.clear(); toast('Moved to a new window');
         } catch (e) { toast('Could not create a window: ' + (e.message || e)); }
         return render();
@@ -1678,19 +1636,21 @@ async function actOpen(act) {
 document.querySelectorAll('#nav button').forEach(b => {
     b.onclick = () => { state.section = b.dataset.sec; render(); };
 });
+let searchT = null;
 $('#search').addEventListener('input', e => {
     state.query = e.target.value.trim();
-    if (state.section === 'open') renderOpen();
-    else render();
+    clearTimeout(searchT);
+    if (state.section === 'open' && !rendering) renderOpen();       // in memory: instant
+    else searchT = setTimeout(render, 200);   // storage / history reads: once typing pauses
 });
 $('#selall').onclick = () => {
     if (state.section === 'closed') {
         state.closedShown.wins.forEach(w => state.closedSel.add(w.id));
         state.closedShown.tabs.forEach(t => state.closedSel.add(t.id));
-        renderClosed().then(renderActions);
+        render();
     } else if (state.section === 'hist') {
         state.histShown.forEach(h => state.histSel.add(h.url));
-        renderHist().then(renderActions);
+        render();
     } else {
         state.windows.forEach(w => w.tabs.filter(matches).forEach(t => state.selected.add(t.id)));
         renderOpen(); renderActions();
@@ -1699,8 +1659,7 @@ $('#selall').onclick = () => {
 $('#selnone').onclick = () => {
     const sel = sectionSelection();
     if (sel) sel.clear();
-    if (state.section === 'closed') renderClosed().then(renderActions);
-    else if (state.section === 'hist') renderHist().then(renderActions);
+    if (state.section === 'closed' || state.section === 'hist') render();
     else { renderOpen(); renderActions(); }
 };
 $('#refresh').onclick = () => { send({ type: 'rebuild' }); render(); };
@@ -1736,6 +1695,30 @@ function applyPopupSizeStyle(w, h) {
         applyPopupSizeStyle(s.popupW || 0, s.popupH || 0);
     } catch (e) {}
 })();
+
+/* Live Open / Groups: re-render when tabs change elsewhere (debounced),
+ * keeping the scroll position. */
+let liveT = null;
+function liveRefresh() {
+    if (state.section !== 'open' && state.section !== 'groups') return;
+    clearTimeout(liveT);
+    liveT = setTimeout(() => {
+        const sc = document.scrollingElement, main = $('#main');
+        const y = sc ? sc.scrollTop : 0, my = main ? main.scrollTop : 0;
+        render().then(() => { if (sc) sc.scrollTop = y; if (main) main.scrollTop = my; });
+    }, 500);
+}
+try {
+    ['onCreated', 'onRemoved', 'onMoved', 'onAttached', 'onDetached', 'onReplaced'].forEach(ev => {
+        if (chrome.tabs[ev]) chrome.tabs[ev].addListener(liveRefresh);
+    });
+    if (chrome.tabs.onUpdated) chrome.tabs.onUpdated.addListener((id, info) => {
+        if (info.url || info.title || info.status === 'complete' || info.groupId != null || info.pinned != null) liveRefresh();
+    });
+    if (chrome.tabGroups) ['onCreated', 'onUpdated', 'onRemoved'].forEach(ev => {
+        try { chrome.tabGroups[ev].addListener(liveRefresh); } catch (e) {}
+    });
+} catch (e) {}
 
 paintIcons();
 get(K.OPEN_JOB, null).then(j => { if (j) watchJob(); });
