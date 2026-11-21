@@ -95,8 +95,22 @@ async function rebuildMirror() {
     } catch (e) { /* transient */ }
 }
 
-/* --------------------------- closed capture --------------------------- */
-async function pushClosedWindow(win) {
+/* --------------------------- closed capture ---------------------------
+ * Every change to the closed lists (captures here, Forget / Clear / Import
+ * from the manager via the closedOp message) runs through ONE queue: a bulk
+ * close fires many onRemoved events at once, and unqueued read-modify-write
+ * kept only the last one. */
+let closedQ = Promise.resolve();
+function withClosed(fn) {
+    const p = closedQ.then(fn, fn);
+    closedQ = p.catch(() => {});
+    return p;
+}
+
+function pushClosedWindow(win) { return withClosed(() => pushClosedWindowNow(win)); }
+function pushClosedTab(tab) { return withClosed(() => pushClosedTabNow(tab)); }
+
+async function pushClosedWindowNow(win) {
     const s = await getSettings();
     if (!s.captureClosed) return;
     const tabs = (win.tabs || []).filter(t => isRestorable(t.url));
@@ -120,7 +134,7 @@ async function pushClosedWindow(win) {
     await set(K.CLOSED_WINDOWS, list.slice(0, s.maxClosedWindows));
 }
 
-async function pushClosedTab(tab) {
+async function pushClosedTabNow(tab) {
     const s = await getSettings();
     if (!s.captureClosed || !isRestorable(tab.url)) return;
     const list = await get(K.CLOSED_TABS, []);
@@ -131,9 +145,74 @@ async function pushClosedTab(tab) {
         closedAt: Date.now(),
         url: tab.url,
         title: tab.title,
-        favIconUrl: tab.favIconUrl || ''
+        favIconUrl: storableIcon(tab.favIconUrl)
     });
     await set(K.CLOSED_TABS, list.slice(0, s.maxClosedTabs));
+}
+
+/* data: favicons are often several KB each; keep only real URLs. */
+function storableIcon(u) { return (u && /^https?:/i.test(u) && u.length < 600) ? u : ''; }
+
+/* ------------------------------ import ------------------------------
+ * Merge a previous "Export all data" JSON. Additive: existing entries win,
+ * duplicates (by id, falling back to content identity) are skipped, entries
+ * with the wrong shape are ignored, and each list is re-sorted newest first
+ * and capped, so the counts report what actually stays. */
+const hasTabs = x => !!x && typeof x === 'object' && Array.isArray(x.tabs) && x.tabs.some(t => t && typeof t.url === 'string');
+const hasUrl = x => !!x && typeof x === 'object' && typeof x.url === 'string';
+const cleanTabs = x => Object.assign({}, x, { tabs: x.tabs.filter(t => t && typeof t.url === 'string') });
+
+async function importDataNow(data) {
+    if (!data || typeof data !== 'object') throw new Error('not an export file');
+    const s = await getSettings();
+    const lists = [
+        ['sessions', K.SESSIONS, v => v.id || ('s|' + v.name + '|' + v.tabs.length), hasTabs, cleanTabs, v => v.savedAt, 0],
+        ['savedGroups', K.SAVED_GROUPS, v => v.id || ('g|' + v.name + '|' + v.tabs.length), hasTabs, cleanTabs, v => v.savedAt, 0],
+        ['closedWindows', K.CLOSED_WINDOWS, v => v.id || ('w|' + v.closedAt), hasTabs, cleanTabs, v => v.closedAt, s.maxClosedWindows],
+        ['closedTabs', K.CLOSED_TABS, v => v.id || ('t|' + v.url + '|' + v.closedAt), hasUrl, v => v, v => v.closedAt, s.maxClosedTabs]
+    ];
+    if (!lists.some(([name]) => Array.isArray(data[name]))) throw new Error('no Tab Vault data found');
+    const added = {}, dropped = {};
+    for (const [name, key, idOf, valid, clean, ts, cap] of lists) {
+        const incoming = Array.isArray(data[name]) ? data[name] : [];
+        const current = (await get(key, [])).filter(x => x && typeof x === 'object');
+        const seen = new Set(current.map(idOf));
+        const fresh = [];
+        for (const item of incoming) {
+            if (!valid(item) || seen.has(idOf(item))) continue;
+            seen.add(idOf(item));
+            fresh.push(clean(item));
+        }
+        let kept = fresh.length;
+        if (fresh.length) {
+            let merged = current.concat(fresh).sort((a, b) => (+ts(b) || 0) - (+ts(a) || 0));
+            if (cap > 0 && merged.length > cap) {
+                const freshSet = new Set(fresh);
+                kept = merged.slice(0, cap).filter(x => freshSet.has(x)).length;
+                merged = merged.slice(0, cap);
+            }
+            if (kept) await set(key, merged);
+        }
+        added[name] = kept;
+        dropped[name] = fresh.length - kept;
+    }
+    return { added, dropped };
+}
+
+async function closedOpNow(msg) {
+    if (msg.op === 'remove') {
+        const ids = new Set(msg.ids || []);
+        await set(K.CLOSED_WINDOWS, (await get(K.CLOSED_WINDOWS, [])).filter(w => !ids.has(w.id)));
+        await set(K.CLOSED_TABS, (await get(K.CLOSED_TABS, [])).filter(t => !ids.has(t.id)));
+        return { ok: true };
+    }
+    if (msg.op === 'clear') {
+        if (msg.what === 'tabs' || msg.what === 'all') await set(K.CLOSED_TABS, []);
+        if (msg.what === 'windows' || msg.what === 'all') await set(K.CLOSED_WINDOWS, []);
+        return { ok: true };
+    }
+    if (msg.op === 'import') return Object.assign({ ok: true }, await importDataNow(msg.data));
+    return { ok: false, error: 'unknown closedOp' };
 }
 
 /* ------------------------------ events ------------------------------ */
@@ -256,6 +335,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (job) job.cancelled = true;
                 await set(K.OPEN_JOB, null);
                 sendResponse({ ok: true });
+            } else if (msg.type === 'closedOp') {
+                try { sendResponse(await withClosed(() => closedOpNow(msg))); }
+                catch (e) { sendResponse({ ok: false, error: String((e && e.message) || e) }); }
             } else if (msg.type === 'rebuild') {
                 await rebuildMirror();
                 sendResponse({ ok: true });

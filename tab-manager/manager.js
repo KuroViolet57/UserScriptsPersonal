@@ -106,6 +106,13 @@ function get(key, def) { return new Promise(r => chrome.storage.local.get({ [key
 function set(key, val) { return new Promise(r => chrome.storage.local.set({ [key]: val }, () => r())); }
 async function getSettings() { return Object.assign({}, DEFAULT_SETTINGS, await get(K.SETTINGS, {})); }
 function send(msg) { return new Promise(r => chrome.runtime.sendMessage(msg, resp => { void chrome.runtime.lastError; r(resp || {}); })); }
+/* Closed lists are edited only by the worker, through one queue (captures
+ * race with edits otherwise). Throws with the worker's error text. */
+async function closedOp(o) {
+    const r = await send(Object.assign({ type: 'closedOp' }, o));
+    if (!r || !r.ok) throw new Error((r && r.error) || 'the background worker did not answer');
+    return r;
+}
 
 /* True only for the toolbar popup window: top-level and not a real tab.
  * (The full-page manager is a tab; the bottom sheet is an iframe.) */
@@ -605,7 +612,7 @@ async function renderClosed() {
         cb.appendChild(mk('Save', () => saveSession(w.tabs, 'Closed window'), '', 'save'));
         cb.appendChild(mk('Forget', async () => {
             state.closedSel.delete(w.id);
-            await set(K.CLOSED_WINDOWS, (await get(K.CLOSED_WINDOWS, [])).filter(x => x.id !== w.id)); render();
+            await closedOp({ op: 'remove', ids: [w.id] }); render();
         }, 'd', 'trash'));
         c.appendChild(cb);
         box.appendChild(c);
@@ -619,7 +626,7 @@ async function renderClosed() {
         bar.appendChild(mk('Clear list', async () => {
             if (!await confirmBox('Clear the closed-tabs list?')) return;
             state.closedSel.clear();
-            await set(K.CLOSED_TABS, []); render();
+            await closedOp({ op: 'clear', what: 'tabs' }); render();
         }, 'd', 'trash'));
         box.appendChild(bar);
     }
@@ -654,8 +661,7 @@ function closedSelItems() {
 
 async function forgetClosedSelected() {
     if (!await confirmBox(`Forget ${state.closedSel.size} selected entr${state.closedSel.size === 1 ? 'y' : 'ies'}?`)) return;
-    await set(K.CLOSED_WINDOWS, (await get(K.CLOSED_WINDOWS, [])).filter(w => !state.closedSel.has(w.id)));
-    await set(K.CLOSED_TABS, (await get(K.CLOSED_TABS, [])).filter(t => !state.closedSel.has(t.id)));
+    await closedOp({ op: 'remove', ids: [...state.closedSel] });
     state.closedSel.clear();
     render();
 }
@@ -1044,8 +1050,7 @@ async function renderSettings() {
         if (!text) return;
         try {
             const merged = await importData(JSON.parse(text));
-            toast(`Imported: ${merged.sessions} sessions, ${merged.savedGroups} groups, ` +
-                  `${merged.closedWindows} windows, ${merged.closedTabs} tabs`);
+            toast(importSummary(merged));
             render();
         } catch (err) {
             toast('Import failed: ' + ((err && err.message) || 'not a valid export'));
@@ -1057,8 +1062,7 @@ async function renderSettings() {
         try {
             const data = JSON.parse(await f.text());
             const merged = await importData(data);
-            toast(`Imported: ${merged.sessions} sessions, ${merged.savedGroups} groups, ` +
-                  `${merged.closedWindows} windows, ${merged.closedTabs} tabs`);
+            toast(importSummary(merged));
             render();
         } catch (err) {
             toast('Import failed: ' + ((err && err.message) || 'not a valid export file'));
@@ -1078,7 +1082,7 @@ async function renderSettings() {
     };
     $('#s-clearclosed').onclick = async () => {
         if (!await confirmBox('Clear all closed windows and tabs?')) return;
-        await set(K.CLOSED_WINDOWS, []); await set(K.CLOSED_TABS, []); render();
+        await closedOp({ op: 'clear', what: 'all' }); render();
     };
     $('#s-diag').onclick = async () => {
         const out = $('#s-diagout');
@@ -1225,33 +1229,19 @@ function loadTimingReport(pad) {
 }
 
 /* Merge a previous "Export all data" JSON into the current install.
- * Additive only: existing entries win, incoming duplicates (by id, falling
- * back to content identity) are skipped. Returns per-list added counts. */
+ * Done by the worker (closedOp import): additive, duplicates and malformed
+ * entries skipped, lists re-sorted newest first and capped to the Setup
+ * limits. Returns per-list counts of what stayed, plus what the cap dropped. */
+function importSummary(m) {
+    const d = m.dropped || {};
+    const lost = (d.closedWindows || 0) + (d.closedTabs || 0);
+    return `Imported: ${m.sessions} sessions, ${m.savedGroups} groups, ${m.closedWindows} windows, ${m.closedTabs} tabs` +
+        (lost ? ` · ${lost} older closed entr${lost === 1 ? 'y' : 'ies'} skipped (past the Setup limit)` : '');
+}
 async function importData(data) {
     if (!data || typeof data !== 'object') throw new Error('not an export file');
-    const lists = [
-        ['sessions', K.SESSIONS, s => s.id || ('s|' + s.name + '|' + (s.tabs || []).length)],
-        ['savedGroups', K.SAVED_GROUPS, g => g.id || ('g|' + g.name + '|' + (g.tabs || []).length)],
-        ['closedWindows', K.CLOSED_WINDOWS, w => w.id || ('w|' + w.closedAt)],
-        ['closedTabs', K.CLOSED_TABS, t => t.id || ('t|' + t.url + '|' + t.closedAt)]
-    ];
-    if (!lists.some(([name]) => Array.isArray(data[name]))) throw new Error('no Tab Vault data found');
-    const added = {};
-    for (const [name, key, idOf] of lists) {
-        const incoming = Array.isArray(data[name]) ? data[name] : [];
-        const current = await get(key, []);
-        const seen = new Set(current.map(idOf));
-        let n = 0;
-        for (const item of incoming) {
-            if (!item || typeof item !== 'object' || seen.has(idOf(item))) continue;
-            seen.add(idOf(item));
-            current.push(item);
-            n++;
-        }
-        if (n) await set(key, current);
-        added[name] = n;
-    }
-    return added;
+    const r = await closedOp({ op: 'import', data });
+    return Object.assign({}, r.added, { dropped: r.dropped || {} });
 }
 
 /* Report exactly what this browser exposes, so group problems can be pinned
