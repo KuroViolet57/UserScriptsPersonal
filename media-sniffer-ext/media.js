@@ -28,9 +28,16 @@ function resolveDl(s) {
 }
 /* Android VIEW intent. Broad type (video/* / audio/*) is what actually
  * resolves on real devices; an exact codec MIME often matches nothing. */
+/* Android package names only (letters, digits, _ and dots, 2+ parts): a ';'
+ * in a typed package would add intent parameters. */
+function safePkg(p) {
+    p = String(p || '').trim();
+    return /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(p) ? p : '';
+}
 function buildIntent(url, pkg, kind, title) {
     let it = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
     it += 'type=' + encodeURIComponent(kind === 'audio' ? 'audio/*' : 'video/*') + ';';
+    pkg = safePkg(pkg);
     if (pkg) it += 'package=' + pkg + ';';
     if (title) it += 'S.title=' + encodeURIComponent(String(title).slice(0, 120)) + ';';
     return it + 'end';
@@ -139,9 +146,24 @@ async function loadItems() {
     state.items.sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 
-/* ------------------------------ render ------------------------------ */
-async function render() {
-    await loadSettings();
+/* ------------------------------ render ------------------------------
+ * One render at a time; asks made while one runs are merged into one more
+ * pass. render() reloads from the worker; render(false) (search, filters)
+ * only re-filters what is already loaded. */
+let rendering = null, renderAgain = false, needReload = true;
+function render(reload = true) {
+    if (reload) needReload = true;
+    if (rendering) { renderAgain = true; return rendering; }
+    rendering = (async () => {
+        try {
+            do { renderAgain = false; const r = needReload; needReload = false; await renderNow(r); } while (renderAgain);
+        } catch (e) { console.warn('[Media Vault] render failed', e); }
+        finally { rendering = null; }
+    })();
+    return rendering;
+}
+async function renderNow(reload) {
+    if (reload || !state.loaded) await loadSettings();
     const s = state.section;
     document.body.dataset.sec = s;
     document.querySelectorAll('.sec').forEach(x => x.classList.add('hidden'));
@@ -151,18 +173,20 @@ async function render() {
 
     if (s === 'settings') { await renderSettings(); renderActions(); return; }
 
-    await loadItems();
+    if (reload || !state.loaded || state.loadedSec !== s) {
+        await loadItems();
+        // counts (only when the data is reloaded, not per keystroke)
+        const rTab = await send({ type: 'getMedia', tabId: state.curTabId });
+        $('#c-tab').textContent = (rTab.ok && rTab.items.length) ? rTab.items.length : '';
+        const rAll = await send({ type: 'getMedia', tabId: null });
+        $('#c-all').textContent = (rAll.ok && rAll.items.length) ? rAll.items.length : '';
+        state.loaded = true; state.loadedSec = s;
+    }
     refreshExtOptions();
 
     const box = $('#sec-' + s);
     box.innerHTML = '';
     const shown = state.items.filter(matches);
-
-    // counts
-    const rTab = await send({ type: 'getMedia', tabId: state.curTabId });
-    $('#c-tab').textContent = (rTab.ok && rTab.items.length) ? rTab.items.length : '';
-    const rAll = await send({ type: 'getMedia', tabId: null });
-    $('#c-all').textContent = (rAll.ok && rAll.items.length) ? rAll.items.length : '';
 
     if (!shown.length) {
         const filtered = state.items.length > 0;
@@ -245,7 +269,7 @@ function mediaRow(it) {
     if (state.section === 'tab') {
         acts.appendChild(ab('On page', 'play', 'p', async () => {
             try {
-                await chrome.tabs.sendMessage(state.curTabId, { type: 'openOverlay' });
+                await chrome.tabs.sendMessage(state.curTabId, { type: 'openOverlay' }, { frameId: 0 });
                 window.close();
             } catch (e) { toast('Open the page first'); }
         }));
@@ -339,10 +363,8 @@ document.querySelectorAll('#actions [data-act]').forEach(b => {
         } else if (act === 'copy') {
             copyText(items.map(i => i.url).join('\n'), items.length + ' URLs copied');
         } else if (act === 'remove') {
-            // remove from view only (per-tab store keeps history until reload)
-            toast('Cleared from list');
-            const keys = new Set(items.map(keyOf));
-            state.items = state.items.filter(i => !keys.has(keyOf(i)));
+            const r = await send({ type: 'remove', items: items.map(i => ({ tabId: i.tabId, url: i.url })) });
+            toast(r.ok ? 'Removed ' + (r.removed || 0) + ' from the list' : 'Could not remove: ' + (r.error || 'no answer'));
         }
         state.selected.clear();
         render();
@@ -561,10 +583,14 @@ function loadTimingReport(pad) {
 document.querySelectorAll('#nav button').forEach(b => {
     b.onclick = () => { state.section = b.dataset.sec; state.selected.clear(); render(); };
 });
-$('#search').addEventListener('input', e => { state.filter.query = e.target.value.trim(); saveFilter(); render(); });
-$('#f-type').addEventListener('change', e => { state.filter.type = e.target.value; saveFilter(); render(); });
-$('#f-ext').addEventListener('change', e => { state.filter.ext = e.target.value; saveFilter(); render(); });
-$('#f-size').addEventListener('change', e => { state.filter.minSize = +e.target.value; saveFilter(); render(); });
+let searchT = null;
+$('#search').addEventListener('input', e => {
+    state.filter.query = e.target.value.trim();
+    clearTimeout(searchT); searchT = setTimeout(() => { saveFilter(); render(false); }, 150);
+});
+$('#f-type').addEventListener('change', e => { state.filter.type = e.target.value; saveFilter(); render(false); });
+$('#f-ext').addEventListener('change', e => { state.filter.ext = e.target.value; saveFilter(); render(false); });
+$('#f-size').addEventListener('change', e => { state.filter.minSize = +e.target.value; saveFilter(); render(false); });
 function saveFilter() { set('filter', state.filter); }
 
 $('#refresh').onclick = () => render();

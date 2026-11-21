@@ -1,5 +1,6 @@
 /* ==========================================================================
- * Media Vault — content script (top frame)
+ * Media Vault — content script (every frame; gestures, sheet and app
+ * hand-off only in the top frame)
  *
  * Complements the background webRequest sniffer with what only the page can
  * see: <video>/<audio> element sources (cached media that never re-hits the
@@ -8,7 +9,7 @@
  * ========================================================================== */
 (() => {
     'use strict';
-    if (window.top !== window) return;
+    const IS_TOP = window.top === window;
     if (window.__mediaVaultLoaded) return;
     window.__mediaVaultLoaded = true;
 
@@ -38,9 +39,15 @@
     }
     /* Android VIEW intent. Broad type (video/* / audio/*) is what actually
      * resolves on real devices; an exact codec MIME often matches nothing. */
+    /* Android package names only: a ';' in a typed package would add intent parameters. */
+    function safePkg(p) {
+        p = String(p || '').trim();
+        return /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(p) ? p : '';
+    }
     function buildIntent(url, pkg, kind, title) {
         let it = 'intent:' + url + '#Intent;action=android.intent.action.VIEW;';
         it += 'type=' + encodeURIComponent(kind === 'audio' ? 'audio/*' : 'video/*') + ';';
+        pkg = safePkg(pkg);
         if (pkg) it += 'package=' + pkg + ';';
         if (title) it += 'S.title=' + encodeURIComponent(String(title).slice(0, 120)) + ';';
         return it + 'end';
@@ -132,10 +139,11 @@
     const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 
     let toastT;
-    function toast(m) {
+    function toast(m, ms) {
+        addStyle();
         let t = document.querySelector('.mv-toast');
-        if (!t) { t = document.createElement('div'); t.className = 'mv-toast'; document.body.appendChild(t); }
-        t.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2400);
+        if (!t) { t = document.createElement('div'); t.className = 'mv-toast'; (document.body || document.documentElement).appendChild(t); }
+        t.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), ms || 2400);
     }
 
     /* --------------------------- on-video button --------------------------- */
@@ -463,20 +471,38 @@
         });
     } catch (e) {}
 
-    /* ------------------------------- boot ------------------------------- */
-    function boot() {
-        scan();
-        armGesture();
+    /* ------------------------------- boot -------------------------------
+     * Embedded frames (players inside iframes) report their own <video>s and
+     * get their own on-video button, but only start the 1.5 s scan loop once
+     * they actually contain media: ad frames stay idle. */
+    let loopOn = false;
+    function startLoop() {
+        if (loopOn) return;
+        loopOn = true;
         let raf = false;
         const onMove = () => { if (!raf) { raf = true; requestAnimationFrame(() => { raf = false; repositionAll(); }); } };
         addEventListener('scroll', onMove, true);
         addEventListener('resize', onMove, true);
         setInterval(() => { scan(); repositionAll(); }, 1500);
     }
+    const hasMedia = () => document.getElementsByTagName('video').length + document.getElementsByTagName('audio').length > 0;
+    function boot() {
+        scan();
+        if (IS_TOP) { armGesture(); startLoop(); return; }
+        if (hasMedia()) { startLoop(); return; }
+        ['loadstart', 'play'].forEach(t => document.addEventListener(t, e => {
+            const el = e.target;
+            if (el && (el.tagName === 'VIDEO' || el.tagName === 'AUDIO')) { scan(); startLoop(); }
+        }, true));
+        const idle = setInterval(() => { if (hasMedia()) { clearInterval(idle); scan(); startLoop(); } }, 5000);
+    }
 
     // popup asks us to open the overlay ("show on page")
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-        if (msg && msg.type === 'openOverlay') { openOverlay2(null); sendResponse({ ok: true }); }
+        if (msg && msg.type === 'mediaCleared') { reported.clear(); setTimeout(scan, 50); return; }   // every frame
+        if (!IS_TOP) return;
+        if (msg && msg.type === 'mvNotice' && typeof msg.text === 'string') { toast(msg.text.slice(0, 240), 7000); sendResponse({ ok: true }); }
+        else if (msg && msg.type === 'openOverlay') { openOverlay2(null); sendResponse({ ok: true }); }
         else if (msg && msg.type === 'openIntent' && /^intent:/.test(msg.intent || '')) {
             // relay from the toolbar popup / full page (may still be blocked
             // by Android without a tap on this page — the link is on the clipboard)
@@ -487,7 +513,7 @@
 
     // The bottom-sheet iframe (our own origin) asks the page to launch an app.
     // The tap inside the iframe also activated this frame, which Android needs.
-    window.addEventListener('message', e => {
+    if (IS_TOP) window.addEventListener('message', e => {
         let ours = '';
         try { ours = chrome.runtime.getURL('').replace(/\/$/, ''); } catch (err) {}
         if (!ours || e.origin !== ours) return;

@@ -29,8 +29,8 @@ export function tabs(n, from = 1) {
 /** Poll until fn() is truthy (or give up after ms); returns the last value. */
 export async function until(fn, ms = 4000) {
     const t0 = Date.now(); let v;
-    while (Date.now() - t0 < ms) { v = fn(); if (v) return v; await wait(20); }
-    return fn();
+    while (Date.now() - t0 < ms) { v = await fn(); if (v) return v; await wait(20); }
+    return await fn();
 }
 /** Plain copy of a value from the worker's vm context (other realm). */
 export const plain = v => JSON.parse(JSON.stringify(v));

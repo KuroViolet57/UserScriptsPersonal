@@ -44,9 +44,10 @@ export function makeStorageArea(store, delay = () => 1) {
 }
 
 export function makeEvent() {
-    const fns = [];
+    const fns = [], args = [];
     return {
-        addListener: f => fns.push(f),
+        addListener: (f, ...rest) => { fns.push(f); args.push(rest); },
+        _args: args,
         removeListener: f => { const i = fns.indexOf(f); if (i >= 0) fns.splice(i, 1); },
         hasListener: f => fns.includes(f),
         fire: (...a) => fns.map(f => f(...a)),
